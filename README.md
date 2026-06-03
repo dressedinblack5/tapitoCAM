@@ -1,41 +1,53 @@
 # tapitoCAM
 
-TP-Link Tapo Camera RSTP Client for Linux.
+TP-Link Tapo Camera RTSP Client for Linux.
 
 ![CLI Preview](assets/cli-preview.png)
 ![Tapo Camera Preview](assets/tc-preview.png)
 
-To enable RTSP (Real-Time Streaming Protocol) on a TP-Link Tapo camera, you must use the Tapo app to create a
-  specific account for camera streaming. Here is the standard process:
+## Prerequisites
 
-   1. Open the Tapo App: Select your camera from the home screen.
-   2. Go to Camera Settings: Tap the gear icon in the top right corner.
-   3. Advanced Settings: Tap "Advanced Settings" (this is usually near the bottom).
-   4. Camera Account: 
-       * Tap "Camera Account".
-       * If you haven't set it up, you will be prompted to create a username and password.
-       * Note: This is separate from your main TP-Link account credentials.
-   5. Connect: Once created, you can use these credentials to access the stream via your local IP address (e.g.,
-      rtsp://username:password@192.168.x.x:554/stream1).
+You need to create a dedicated **Camera Account** in the Tapo app for RTSP access:
+
+1. Open the Tapo app and select your camera.
+2. Tap the gear icon → **Advanced Settings** → **Camera Account**.
+3. Create a username and password (separate from your main TP-Link account).
+4. Use these credentials with tapitoCAM to connect via the camera's local IP.
 
 ## How to use
 
-1. Clone this repository to your desired location (e.g., `~/Downloads/tapitoCAM`) and `cd` to it :
+1. Clone and enter the repository:
    ```bash
-   git clone https://github.com/dressedinblack5/tapitoCAM.git ~/Downloads/tapitoCAM && cd ~/Downloads/tapitoCAM
-
-2. Make the script executable:
-   ```bash
-   chmod +x tapitocam.sh
-   ```
-3. Run the script:
-   ```bash
-   bash tapitocam.sh
+   git clone https://github.com/dressedinblack5/tapitoCAM.git ~/Downloads/tapitoCAM
+   cd ~/Downloads/tapitoCAM
    ```
 
-When you run the script for the first time, it will interactively prompt you for:
-- Tapo Username
-- Tapo Password
-- Camera IP Address
+2. Run the script:
+   ```bash
+   ./tapitocam.sh
+   ```
 
-*These will be saved securely in a local hidden file named `.tapitocam.env` in the same directory as the script.*
+On first run you'll be prompted for your Tapo username, password, and camera IP.
+Credentials are saved to `.tapitocam.env` (stored with `chmod 600` in the script directory).
+
+### Options
+
+```
+Usage: tapitocam.sh [OPTIONS]
+
+  -h, --help       Show this help message
+  -r, --reset      Reset saved configuration
+  -i, --ip IP      Set camera IP address (overrides saved config)
+```
+
+Examples:
+```bash
+./tapitocam.sh -i 192.168.1.100
+./tapitocam.sh --reset
+```
+
+## Notes
+
+- Username and password are URL-encoded automatically to handle special characters.
+- IP addresses are validated (each octet 0-255).
+- Temporary mpv logs are cleaned up automatically on exit.
