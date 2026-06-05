@@ -7,7 +7,14 @@ TP-Link Tapo Camera RTSP Client for Linux.
 
 ## Prerequisites
 
-You need to create a dedicated **Camera Account** in the Tapo app for RTSP access:
+- **RTSP-compatible Tapo camera** (e.g., C200, C310, C320WS)
+- **mpv** — video player (`apt install mpv`)
+- **Python 3.10+ and PySide6** (for GUI):
+  ```bash
+  pip install pyside6 python-mpv onvif-zeep
+  ```
+
+You also need to create a dedicated **Camera Account** in the Tapo app for RTSP access:
 
 1. Open the Tapo app and select your camera.
 2. Tap the gear icon → **Advanced Settings** → **Camera Account**.
@@ -23,14 +30,24 @@ You need to create a dedicated **Camera Account** in the Tapo app for RTSP acces
    ```
 
 2. Run the script:
+
+   **CLI (lightweight):**
    ```bash
    ./tapitocam.sh
+   ```
+
+   **GUI (PTZ controls):**
+   ```bash
+   ./tapitocam_gui.py
    ```
 
 On first run you'll be prompted for your Tapo username, password, and camera IP.
 Credentials are saved to `.tapitocam.env` (stored with `chmod 600` in the script directory).
 
-### Options
+You can also launch the GUI from your app launcher — the included `tapitoCAM.desktop`
+file registers `tapitocam_gui.py` as a desktop application.
+
+### CLI Options
 
 ```
 Usage: tapitocam.sh [OPTIONS]
@@ -51,3 +68,5 @@ Examples:
 - Username and password are URL-encoded automatically to handle special characters.
 - IP addresses are validated (each octet 0-255).
 - Temporary mpv logs are cleaned up automatically on exit.
+- The GUI supports PTZ (pan/tilt/zoom) control via ONVIF and stream quality selection.
+- Use `stream1` for HD and `stream2` for SD (useful on slow networks).
