@@ -17,7 +17,18 @@ echo "       mpv — found"
 
 # ── Install Python dependencies ──
 echo "[2/3] Installing Python dependencies..."
-python3 -m pip install --user -r "$SCRIPT_DIR/requirements.txt"
+
+install_python_deps() {
+    python3 -m pip install --user -r "$SCRIPT_DIR/requirements.txt" 2>/dev/null ||
+    python3 -m pip install --user --break-system-packages -r "$SCRIPT_DIR/requirements.txt"
+}
+
+if ! install_python_deps; then
+    echo "Error: Failed to install Python dependencies."
+    echo "Try using pipx instead:"
+    echo "  pipx install pyside6 python-mpv onvif-zeep"
+    exit 1
+fi
 
 # ── Install files ──
 echo "[3/3] Installing tapitoCAM..."
