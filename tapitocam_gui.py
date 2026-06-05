@@ -8,6 +8,7 @@ locale.setlocale(locale.LC_NUMERIC, "C")
 
 import base64
 import re
+import socket
 import sys
 import tempfile
 import urllib.parse
@@ -18,7 +19,7 @@ import mpv
 from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFormLayout, QGridLayout,
-    QHBoxLayout, QLineEdit, QMainWindow, QMessageBox,
+    QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMessageBox,
     QPushButton, QInputDialog, QStatusBar, QVBoxLayout,
     QWidget,
 )
@@ -31,6 +32,18 @@ def _validate_ip(ip):
         if not p.isdigit() or not 0 <= int(p) <= 255:
             return False
     return True
+
+
+class _Worker(QObject):
+    finished = Signal(object)
+
+    def __init__(self, fn):
+        super().__init__()
+        self.fn = fn
+
+    @Slot()
+    def run(self):
+        self.finished.emit(self.fn())
 
 
 NETWORK_ERRORS = [
@@ -130,6 +143,7 @@ class MainWindow(QMainWindow):
         self.stream_ended.connect(self._on_stream_ended)
         self._init_ui()
         self._load_config()
+        self._check_camera_status()
         self._init_ptz()
 
     def _init_ui(self):
@@ -171,6 +185,10 @@ class MainWindow(QMainWindow):
         config_layout.addRow("", btn_row)
 
         layout.addWidget(config_panel)
+
+        self.status_label = QLabel("● Checking...")
+        self.status_label.setStyleSheet("color: #888888; padding: 4px 0;")
+        layout.addWidget(self.status_label)
 
         stream_row = QHBoxLayout()
         stream_row.setSpacing(8)
@@ -236,6 +254,43 @@ class MainWindow(QMainWindow):
         self.ptz_left.released.connect(self._ptz_stop)
         self.ptz_right.pressed.connect(lambda: self._ptz_move(0.3, 0))
         self.ptz_right.released.connect(self._ptz_stop)
+
+    def _check_camera_status(self):
+        ip = self.ip_edit.text().strip()
+        if not ip:
+            self.status_label.setText("● No IP configured")
+            self.status_label.setStyleSheet("color: #888888; padding: 4px 0;")
+            return
+
+        def check():
+            try:
+                s = socket.create_connection((ip, 554), timeout=2)
+                s.close()
+                return True
+            except OSError:
+                return False
+
+        def done(ok):
+            if ok:
+                self.status_label.setText("● Camera reachable")
+                self.status_label.setStyleSheet(
+                    "color: #22c55e; padding: 4px 0; font-weight: bold;")
+            else:
+                self.status_label.setText("● Camera unreachable")
+                self.status_label.setStyleSheet(
+                    "color: #ef4444; padding: 4px 0; font-weight: bold;")
+
+        self.status_label.setText("● Checking...")
+        self.status_label.setStyleSheet("color: #888888; padding: 4px 0;")
+        t = QThread(self)
+        w = _Worker(check)
+        w.moveToThread(t)
+        t.started.connect(w.run)
+        w.finished.connect(done)
+        w.finished.connect(t.quit)
+        w.finished.connect(w.deleteLater)
+        t.finished.connect(t.deleteLater)
+        t.start()
 
     def _init_ptz(self):
         self._cleanup_ptz()
@@ -320,6 +375,7 @@ class MainWindow(QMainWindow):
             f.write(f"TAPO_PASS={encoded_pass}\n")
             f.write(f"TAPO_IP={ip}\n")
         os.chmod(CONFIG_FILE, 0o600)
+        self._check_camera_status()
         self._init_ptz()
 
     def _reset_config(self):
@@ -330,6 +386,8 @@ class MainWindow(QMainWindow):
         self.ip_edit.clear()
         self._cleanup_ptz()
         self.ptz_widget.setEnabled(False)
+        self.status_label.setText("● No IP configured")
+        self.status_label.setStyleSheet("color: #888888; padding: 4px 0;")
         self.status_bar.showMessage("Configuration reset", 3000)
 
     def _build_rtsp_url(self):
