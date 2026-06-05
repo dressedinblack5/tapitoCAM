@@ -3,6 +3,7 @@
 TP-Link Tapo Camera RTSP Client for Linux.
 
 ![CLI Preview](assets/cli-preview.png)
+![GUI Preview](assets/gui-preview.png)
 ![Tapo Camera Preview](assets/tc-preview.png)
 
 ## Prerequisites
