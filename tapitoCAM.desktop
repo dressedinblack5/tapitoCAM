@@ -1,17 +1,9 @@
 [Desktop Entry]
-Comment[en_US]=
-Comment=
-Exec=tapitocam.sh
-GenericName[en_US]=
-GenericName=tapitoCAM
-Icon=camera-app
-MimeType=
-Name[en_US]=tapitoCAM
 Name=tapitoCAM
-Path=
-StartupNotify=true
-Terminal=true
-TerminalOptions=
+Comment=TP-Link Tapo Camera RTSP Viewer & PTZ Controller
+Exec=tapitocam_gui.py
+Icon=camera-app
+Terminal=false
 Type=Application
-X-KDE-SubstituteUID=false
-X-KDE-Username=
+StartupNotify=true
+Categories=Video;Network;
