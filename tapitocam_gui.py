@@ -6,6 +6,7 @@ import os
 os.environ["LC_NUMERIC"] = "C"
 locale.setlocale(locale.LC_NUMERIC, "C")
 
+import base64
 import re
 import sys
 import tempfile
@@ -21,6 +22,16 @@ from PySide6.QtWidgets import (
     QPushButton, QInputDialog, QStatusBar, QVBoxLayout,
     QWidget,
 )
+
+def _validate_ip(ip):
+    parts = ip.split(".")
+    if len(parts) != 4:
+        return False
+    for p in parts:
+        if not p.isdigit() or not 0 <= int(p) <= 255:
+            return False
+    return True
+
 
 NETWORK_ERRORS = [
     "No route to host",
@@ -287,16 +298,27 @@ class MainWindow(QMainWindow):
                 if key == "TAPO_USER":
                     self.username_edit.setText(val)
                 elif key == "TAPO_PASS":
+                    try:
+                        val = base64.b64decode(val).decode()
+                    except Exception:
+                        pass
                     self.password_edit.setText(val)
                 elif key == "TAPO_IP":
                     self.ip_edit.setText(val)
 
     def _save_config(self):
+        ip = self.ip_edit.text().strip()
+        if ip and not _validate_ip(ip):
+            QMessageBox.warning(self, "Invalid IP",
+                                "Please enter a valid IP address.")
+            return
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        encoded_pass = base64.b64encode(
+            self.password_edit.text().encode()).decode()
         with open(CONFIG_FILE, "w") as f:
             f.write(f"TAPO_USER={self.username_edit.text()}\n")
-            f.write(f"TAPO_PASS={self.password_edit.text()}\n")
-            f.write(f"TAPO_IP={self.ip_edit.text()}\n")
+            f.write(f"TAPO_PASS={encoded_pass}\n")
+            f.write(f"TAPO_IP={ip}\n")
         os.chmod(CONFIG_FILE, 0o600)
         self._init_ptz()
 
@@ -369,6 +391,11 @@ class MainWindow(QMainWindow):
         if not username or not password or not ip:
             QMessageBox.warning(self, "Missing Fields",
                                 "Please enter camera credentials and IP.")
+            return
+
+        if not _validate_ip(ip):
+            QMessageBox.warning(self, "Invalid IP",
+                                "Please enter a valid IP address.")
             return
 
         self._create_player()

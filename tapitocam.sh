@@ -33,7 +33,7 @@ load_config() {
         [[ "$line" =~ ^#         ]] && continue
         [[ -z "$line"            ]] && continue
         [[ "$line" =~ ^TAPO_USER=(.*)$ ]] && TAPO_USER="${BASH_REMATCH[1]}"
-        [[ "$line" =~ ^TAPO_PASS=(.*)$ ]] && TAPO_PASS="${BASH_REMATCH[1]}"
+        [[ "$line" =~ ^TAPO_PASS=(.*)$ ]] && TAPO_PASS=$(printf '%s' "${BASH_REMATCH[1]}" | base64 -d 2>/dev/null || printf '%s' "${BASH_REMATCH[1]}")
         [[ "$line" =~ ^TAPO_IP=(.*)$   ]] && TAPO_IP="${BASH_REMATCH[1]}"
     done < "$CONFIG_FILE"
 }
@@ -43,7 +43,7 @@ save_config() {
     {
         echo "# tapitoCAM configuration"
         echo "TAPO_USER=$TAPO_USER"
-        echo "TAPO_PASS=$TAPO_PASS"
+        echo "TAPO_PASS=$(printf '%s' "$TAPO_PASS" | base64 -w0)"
         echo "TAPO_IP=$TAPO_IP"
     } > "$CONFIG_FILE"
     chmod 600 "$CONFIG_FILE"
@@ -110,6 +110,11 @@ run_stream() {
     local rtsp_url
     rtsp_url="rtsp://$(urlencode "$TAPO_USER"):$(urlencode "$TAPO_PASS")@${TAPO_IP}/stream1"
 
+    local url_file
+    url_file=$(mktemp) || exit 1
+    chmod 600 "$url_file"
+    echo "$rtsp_url" > "$url_file"
+
     local mpv_opts=(
         --profile=fast
         --untimed
@@ -126,8 +131,10 @@ run_stream() {
     local error_log
     error_log=$(mktemp) || exit 1
 
-    mpv --log-file="$error_log" "${mpv_opts[@]}" "$rtsp_url"
+    mpv --log-file="$error_log" "${mpv_opts[@]}" --playlist="$url_file"
     local exit_code=$?
+
+    rm -f "$url_file"
 
     if [[ $exit_code -ne 0 && $exit_code -ne 130 && -s "$error_log" ]]; then
         if is_network_error "$error_log"; then
