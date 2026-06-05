@@ -21,31 +21,35 @@ You also need to create a dedicated **Camera Account** in the Tapo app for RTSP 
 3. Create a username and password (separate from your main TP-Link account).
 4. Use these credentials with tapitoCAM to connect via the camera's local IP.
 
-## How to use
+## Quick install
 
-1. Clone and enter the repository:
-   ```bash
-   git clone https://github.com/dressedinblack5/tapitoCAM.git ~/Downloads/tapitoCAM
-   cd ~/Downloads/tapitoCAM
-   ```
+```bash
+git clone https://github.com/dressedinblack5/tapitoCAM.git
+cd tapitoCAM
+./install.sh
+```
 
-2. Run the script:
+This installs `tapitocam` (CLI) and `tapitocam-gui` to `~/.local/bin/` and
+registers the desktop app.  Add `~/.local/bin` to your `PATH` if needed:
 
-   **CLI (lightweight):**
-   ```bash
-   ./tapitocam.sh
-   ```
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
 
-   **GUI (PTZ controls):**
-   ```bash
-   ./tapitocam_gui.py
-   ```
+## Run without installing
 
-On first run you'll be prompted for your Tapo username, password, and camera IP.
-Credentials are saved to `.tapitocam.env` (stored with `chmod 600` in the script directory).
+```bash
+git clone https://github.com/dressedinblack5/tapitoCAM.git
+cd tapitoCAM
+./tapitocam.sh       # CLI
+./tapitocam_gui.py   # GUI
+```
 
-You can also launch the GUI from your app launcher — the included `tapitoCAM.desktop`
-file registers `tapitocam_gui.py` as a desktop application.
+## First run
+
+On first launch you'll be prompted for your Tapo camera username, password,
+and local IP address.  Credentials are saved to
+`~/.config/tapitocam/.tapitocam.env` (permissions `600`).
 
 ### CLI Options
 
@@ -59,8 +63,16 @@ Usage: tapitocam.sh [OPTIONS]
 
 Examples:
 ```bash
-./tapitocam.sh -i 192.168.1.100
-./tapitocam.sh --reset
+tapitocam -i 192.168.1.100
+tapitocam --reset
+```
+
+## Uninstall
+
+```bash
+rm -f ~/.local/bin/tapitocam ~/.local/bin/tapitocam-gui \
+      ~/.local/share/applications/tapitoCAM.desktop
+rm -rf ~/.config/tapitocam
 ```
 
 ## Notes
