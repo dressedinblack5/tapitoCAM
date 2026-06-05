@@ -1,0 +1,3 @@
+tapitocam.sh                 usr/bin/tapitocam
+tapitocam_gui.py             usr/bin/tapitocam-gui
+debian/tapitocam.desktop     usr/share/applications/tapitoCAM.desktop

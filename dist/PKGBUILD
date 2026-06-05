@@ -1,0 +1,36 @@
+# Maintainer: Anonymous <root@localhost>
+
+pkgname=tapitocam
+pkgver=1.1.0
+pkgrel=1
+pkgdesc="TP-Link Tapo Camera RTSP Viewer & PTZ Controller"
+arch=('any')
+url=""
+license=('Apache')
+depends=(
+  'python'
+  'python-pyside6'
+  'mpv'
+  'python-mpv'
+)
+makedepends=()
+optdepends=('python-onvif-zeep: PTZ control via ONVIF')
+source=(
+  "tapitocam.sh"
+  "tapitocam_gui.py"
+  "tapitoCAM.desktop"
+)
+sha256sums=('SKIP' 'SKIP' 'SKIP')
+
+package() {
+  install -Dm755 "$srcdir/tapitocam.sh"     "$pkgdir/usr/bin/tapitocam"
+  install -Dm755 "$srcdir/tapitocam_gui.py" "$pkgdir/usr/bin/tapitocam-gui"
+
+  # Fix Exec path in desktop file
+  sed 's|Exec=tapitocam_gui.py|Exec=tapitocam-gui|' \
+    "$srcdir/tapitoCAM.desktop" \
+    > "$pkgdir/usr/share/applications/tapitoCAM.desktop"
+  chmod 644 "$pkgdir/usr/share/applications/tapitoCAM.desktop"
+
+  install -Dm644 "$srcdir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
