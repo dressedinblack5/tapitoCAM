@@ -38,7 +38,7 @@ install -Dm755 "$SCRIPT_DIR/tapitocam.sh"         "$HOME/.local/bin/tapitocam"
 install -Dm755 "$SCRIPT_DIR/tapitocam_gui.py"     "$HOME/.local/bin/tapitocam-gui"
 
 # Install desktop entry (for current user only)
-install -Dm644 "$SCRIPT_DIR/tapitoCAM.desktop"    "$HOME/.local/share/applications/tapitoCAM.desktop"
+install -Dm644 "$SCRIPT_DIR/dist/tapitoCAM.desktop"    "$HOME/.local/share/applications/tapitoCAM.desktop"
 
 # Fix desktop Exec path to point to installed location
 sed -i "s|Exec=tapitocam_gui.py|Exec=$HOME/.local/bin/tapitocam-gui|" \
