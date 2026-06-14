@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+"""tapitoCAM — multi-camera TP-Link Tapo RTSP control center.
+
+Streams play in standalone mpv windows (one per camera).  The GUI acts
+as a control panel for selecting cameras, managing PTZ, and starting /
+stopping streams.
+"""
 
 import locale
 import os
@@ -6,556 +12,502 @@ import os
 os.environ["LC_NUMERIC"] = "C"
 locale.setlocale(locale.LC_NUMERIC, "C")
 
-import base64
-import re
-import socket
-import sys
-import tempfile
-import urllib.parse
-from pathlib import Path
+import signal  # noqa: E402
+import subprocess  # noqa: E402
+import sys  # noqa: E402
+import urllib.parse  # noqa: E402
 
-import mpv
-
-from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
-from PySide6.QtWidgets import (
-    QApplication, QComboBox, QFormLayout, QGridLayout,
-    QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMessageBox,
-    QPushButton, QInputDialog, QStatusBar, QVBoxLayout,
+from PySide6.QtCore import Qt, QTimer  # noqa: E402
+from PySide6.QtWidgets import (  # noqa: E402
+    QApplication,
+    QComboBox,
+    QDialog,
+    QFormLayout,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QStatusBar,
+    QVBoxLayout,
     QWidget,
 )
 
-def _validate_ip(ip):
-    parts = ip.split(".")
-    if len(parts) != 4:
-        return False
-    for p in parts:
-        if not p.isdigit() or not 0 <= int(p) <= 255:
-            return False
-    return True
+from cameraconfig import ConfigManager  # noqa: E402
+from cameradialog import CameraManagerDialog  # noqa: E402
+from cameratile import PTZController  # noqa: E402
 
 
-class _Worker(QObject):
-    finished = Signal(object)
-
-    def __init__(self, fn):
-        super().__init__()
-        self.fn = fn
-
-    @Slot()
-    def run(self):
-        self.finished.emit(self.fn())
-
-
-NETWORK_ERRORS = [
-    "No route to host",
-    "Connection timed out",
-    "Connection refused",
-    "Failed to resolve hostname",
-]
-
-SCRIPT_DIR = Path(__file__).resolve().parent
-CONFIG_DIR = Path.home() / ".config" / "tapitocam"
-CONFIG_FILE = CONFIG_DIR / ".tapitocam.env"
-
-
-class PTZWorker(QObject):
-    connected = Signal(bool)
-    error = Signal(str)
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.ptz = None
-        self.profile_token = None
-
-    @Slot(str, str, str)
-    def connect(self, ip, user, password):
-        try:
-            from onvif import ONVIFCamera
-            cam = ONVIFCamera(ip, 2020, user, password)
-            self.ptz = cam.create_ptz_service()
-            configs = self.ptz.GetConfigurations()
-            if configs:
-                self.profile_token = configs[0].token
-            self.connected.emit(True)
-        except Exception as e:
-            self.cleanup()
-            self.error.emit(str(e))
-            self.connected.emit(False)
-
-    @Slot(float, float)
-    def continuous_move(self, pan, tilt):
-        if not self.ptz:
-            return
-        try:
-            request = self.ptz.create_type("ContinuousMove")
-            request.ProfileToken = self.profile_token
-            request.Velocity = {
-                "PanTilt": {"x": float(pan), "y": float(tilt), "space": "http://www.onvif.org/ver10/tptz/PanTiltSpaces/VelocityGenericSpace"},
-                "Zoom": {"x": 0.0},
-            }
-            self.ptz.ContinuousMove(request)
-        except Exception as e:
-            self.error.emit(str(e))
-
-    @Slot()
-    def stop(self):
-        if not self.ptz:
-            return
-        try:
-            request = self.ptz.create_type("Stop")
-            request.ProfileToken = self.profile_token
-            self.ptz.Stop(request)
-        except Exception as e:
-            self.error.emit(str(e))
-
-    @Slot(float, float)
-    def absolute_move(self, pan, tilt):
-        if not self.ptz:
-            return
-        try:
-            request = self.ptz.create_type("AbsoluteMove")
-            request.ProfileToken = self.profile_token
-            request.Position = {
-                "PanTilt": {"x": pan, "y": tilt},
-                "Zoom": {"x": 0},
-            }
-            self.ptz.AbsoluteMove(request)
-        except Exception as e:
-            self.error.emit(str(e))
-
-    def cleanup(self):
-        self.ptz = None
-        self.profile_token = None
-
+# ===========================================================================
+# Main Window
+# ===========================================================================
 
 class MainWindow(QMainWindow):
-    stream_errored = Signal(str)
-    stream_ended = Signal()
+    """Control center for multiple Tapo cameras."""
 
     def __init__(self):
         super().__init__()
-        self.player = None
-        self.error_log = None
-        self.ptz_worker = None
-        self.ptz_thread = None
-        self._streaming = False
-        self.stream_errored.connect(self._handle_network_error)
-        self.stream_ended.connect(self._on_stream_ended)
+        self._cfg = ConfigManager()
+
+        # camera_id -> subprocess.Popen
+        self._processes: dict[int, subprocess.Popen] = {}
+
+        # camera_id -> PTZController (synchronous, no threads)
+        self._ptz_controllers: dict[int, PTZController] = {}
+
+        self._current_camera_id: int | None = None
+        self._updating_selector = False
+
         self._init_ui()
-        self._load_config()
-        self._check_camera_status()
-        self._init_ptz()
+        self._refresh_camera_list()
+        self._migrate_if_needed()
+
+    # ------------------------------------------------------------------
+    # UI
+    # ------------------------------------------------------------------
 
     def _init_ui(self):
         self.setWindowTitle("tapitoCAM")
-        self.setMinimumSize(300, 420)
-        self.resize(300, 400)
+        self.setMinimumSize(420, 480)
+        self.resize(480, 540)
 
         central = QWidget()
         central.setObjectName("central_widget")
         self.setCentralWidget(central)
         layout = QVBoxLayout(central)
         layout.setSpacing(10)
-        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setContentsMargins(12, 12, 12, 12)
 
-        config_panel = QWidget()
-        config_layout = QFormLayout(config_panel)
-        config_layout.setContentsMargins(0, 0, 0, 0)
-        config_layout.setSpacing(6)
+        # ---- Toolbar ----
+        toolbar = QHBoxLayout()
+        toolbar.setSpacing(8)
 
-        self.username_edit = QLineEdit()
-        self.username_edit.setPlaceholderText("Tapo Username")
-        config_layout.addRow("Username:", self.username_edit)
+        self._manage_btn = QPushButton("Manage Cameras")
+        self._manage_btn.clicked.connect(self._on_manage_cameras)
 
-        self.password_edit = QLineEdit()
-        self.password_edit.setPlaceholderText("Tapo Password")
-        self.password_edit.setEchoMode(QLineEdit.Password)
-        config_layout.addRow("Password:", self.password_edit)
+        self._start_all_btn = QPushButton("▶ Start All")
+        self._start_all_btn.clicked.connect(self._start_all)
 
-        self.ip_edit = QLineEdit()
-        self.ip_edit.setPlaceholderText("e.g. 192.168.1.100")
-        config_layout.addRow("IP:", self.ip_edit)
+        self._stop_all_btn = QPushButton("■ Stop All")
+        self._stop_all_btn.clicked.connect(self._stop_all)
 
-        btn_row = QHBoxLayout()
-        self.save_btn = QPushButton("Save")
-        self.reset_btn = QPushButton("Reset")
-        btn_row.addWidget(self.save_btn)
-        btn_row.addWidget(self.reset_btn)
-        btn_row.addStretch()
-        config_layout.addRow("", btn_row)
+        toolbar.addWidget(self._manage_btn)
+        toolbar.addStretch()
+        toolbar.addWidget(self._start_all_btn)
+        toolbar.addWidget(self._stop_all_btn)
+        layout.addLayout(toolbar)
 
-        layout.addWidget(config_panel)
+        # ---- Camera selector ----
+        selector_row = QHBoxLayout()
+        selector_row.setSpacing(8)
+        selector_row.addWidget(QLabel("Camera:"))
+        self._camera_combo = QComboBox()
+        self._camera_combo.setMinimumWidth(240)
+        self._camera_combo.currentIndexChanged.connect(self._on_camera_selected)
+        selector_row.addWidget(self._camera_combo, stretch=1)
+        layout.addLayout(selector_row)
 
-        self.status_label = QLabel("● Checking...")
-        self.status_label.setStyleSheet("color: #888888; padding: 4px 0;")
-        layout.addWidget(self.status_label)
+        # ---- Camera info panel ----
+        info_panel = QWidget()
+        info_panel.setObjectName("info_panel")
+        info_panel.setStyleSheet(
+            "QWidget#info_panel { background: #1a1a1a; border: 1px solid #333333;"
+            " border-radius: 8px; }"
+        )
+        info_layout = QVBoxLayout(info_panel)
+        info_layout.setSpacing(8)
+        info_layout.setContentsMargins(12, 12, 12, 12)
 
+        # Camera details
+        self._name_label = QLabel("No camera selected")
+        self._name_label.setStyleSheet(
+            "font-size: 15px; font-weight: bold; color: #e0e0e0;"
+        )
+        info_layout.addWidget(self._name_label)
+
+        detail_grid = QFormLayout()
+        detail_grid.setSpacing(4)
+        self._ip_label = QLabel("—")
+        self._ip_label.setStyleSheet("color: #aaaaaa;")
+        self._status_label = QLabel("● —")
+        self._status_label.setStyleSheet("color: #888888; padding: 2px 0;")
+        detail_grid.addRow("IP:", self._ip_label)
+        detail_grid.addRow("Status:", self._status_label)
+        info_layout.addLayout(detail_grid)
+
+        # Stream controls
         stream_row = QHBoxLayout()
         stream_row.setSpacing(8)
 
-        self.stream_btn = QPushButton("▶  Open Stream")
-        self.stream_btn.setMinimumHeight(32)
-        self.stream_btn.clicked.connect(self._toggle_stream)
-        stream_row.addWidget(self.stream_btn)
+        self._stream_btn = QPushButton("▶ Open Stream")
+        self._stream_btn.setMinimumHeight(34)
+        self._stream_btn.clicked.connect(self._toggle_stream)
+        self._stream_btn.setEnabled(False)
+        stream_row.addWidget(self._stream_btn)
 
-        self.quality_combo = QComboBox()
-        self.quality_combo.addItems(["HD (stream1)", "SD (stream2)"])
-        stream_row.addWidget(self.quality_combo)
+        self._quality_combo = QComboBox()
+        self._quality_combo.addItems(["HD (stream1)", "SD (stream2)"])
+        self._quality_combo.setEnabled(False)
+        stream_row.addWidget(self._quality_combo)
 
-        layout.addLayout(stream_row)
+        stream_row.addStretch()
+        info_layout.addLayout(stream_row)
 
-        self.ptz_widget = QWidget()
-        self.ptz_widget.setEnabled(False)
-        ptz_layout = QVBoxLayout(self.ptz_widget)
-        ptz_layout.setContentsMargins(0, 0, 0, 0)
-        ptz_layout.setSpacing(8)
+        # PTZ controls
+        ptz_widget = QWidget()
+        ptz_widget.setObjectName("ptz_widget")
+        ptz_grid = QGridLayout(ptz_widget)
+        ptz_grid.setSpacing(4)
+        ptz_grid.setContentsMargins(0, 0, 0, 0)
 
-        grid_container = QWidget()
-        grid_outer = QHBoxLayout(grid_container)
-        grid_outer.setContentsMargins(0, 0, 0, 0)
-        grid = QGridLayout()
-        grid.setSpacing(6)
-        btn_size = 50
+        btn_size = 48
+        self._ptz_up = QPushButton("▲")
+        self._ptz_up.setFixedSize(btn_size, btn_size)
+        self._ptz_up.setEnabled(False)
 
-        self.ptz_up = QPushButton("▲")
-        self.ptz_up.setFixedSize(btn_size, btn_size)
-        self.ptz_down = QPushButton("▼")
-        self.ptz_down.setFixedSize(btn_size, btn_size)
-        self.ptz_left = QPushButton("◀")
-        self.ptz_left.setFixedSize(btn_size, btn_size)
-        self.ptz_right = QPushButton("▶")
-        self.ptz_right.setFixedSize(btn_size, btn_size)
+        self._ptz_down = QPushButton("▼")
+        self._ptz_down.setFixedSize(btn_size, btn_size)
+        self._ptz_down.setEnabled(False)
 
-        grid.addWidget(self.ptz_up, 0, 1)
-        grid.addWidget(self.ptz_left, 1, 0)
-        grid.addWidget(self.ptz_right, 1, 2)
-        grid.addWidget(self.ptz_down, 2, 1)
+        self._ptz_left = QPushButton("◀")
+        self._ptz_left.setFixedSize(btn_size, btn_size)
+        self._ptz_left.setEnabled(False)
 
-        grid_outer.addStretch()
-        grid_outer.addLayout(grid)
-        grid_outer.addStretch()
+        self._ptz_right = QPushButton("▶")
+        self._ptz_right.setFixedSize(btn_size, btn_size)
+        self._ptz_right.setEnabled(False)
 
-        ptz_layout.addWidget(grid_container)
-        ptz_layout.addStretch()
+        self._ptz_stop_btn = QPushButton("■")
+        self._ptz_stop_btn.setFixedSize(btn_size, btn_size)
+        self._ptz_stop_btn.setEnabled(False)
 
-        layout.addWidget(self.ptz_widget)
+        ptz_grid.addWidget(self._ptz_up, 0, 1, Qt.AlignmentFlag.AlignCenter)
+        ptz_grid.addWidget(self._ptz_left, 1, 0, Qt.AlignmentFlag.AlignCenter)
+        ptz_grid.addWidget(self._ptz_stop_btn, 1, 1, Qt.AlignmentFlag.AlignCenter)
+        ptz_grid.addWidget(self._ptz_right, 1, 2, Qt.AlignmentFlag.AlignCenter)
+        ptz_grid.addWidget(self._ptz_down, 2, 1, Qt.AlignmentFlag.AlignCenter)
 
+        self._ptz_up.pressed.connect(lambda: self._ptz_move(0, 0.3))
+        self._ptz_up.released.connect(self._ptz_stop)
+        self._ptz_down.pressed.connect(lambda: self._ptz_move(0, -0.3))
+        self._ptz_down.released.connect(self._ptz_stop)
+        self._ptz_left.pressed.connect(lambda: self._ptz_move(-0.3, 0))
+        self._ptz_left.released.connect(self._ptz_stop)
+        self._ptz_right.pressed.connect(lambda: self._ptz_move(0.3, 0))
+        self._ptz_right.released.connect(self._ptz_stop)
+        self._ptz_stop_btn.clicked.connect(self._ptz_stop)
+
+        ptz_row = QHBoxLayout()
+        ptz_row.addStretch()
+        ptz_row.addWidget(ptz_widget)
+        ptz_row.addStretch()
+        info_layout.addLayout(ptz_row)
+
+        layout.addWidget(info_panel, stretch=1)
+
+        # ---- Status bar ----
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
+        self.status_bar.showMessage("Ready", 3000)
 
-        self.save_btn.clicked.connect(self._save_config)
-        self.reset_btn.clicked.connect(self._reset_config)
+        # Timer to refresh streaming status in UI
+        self._refresh_timer = QTimer(self)
+        self._refresh_timer.setInterval(2000)
+        self._refresh_timer.timeout.connect(self._sync_ui)
+        self._refresh_timer.start()
 
-        self.ptz_up.pressed.connect(lambda: self._ptz_move(0, 0.3))
-        self.ptz_up.released.connect(self._ptz_stop)
-        self.ptz_down.pressed.connect(lambda: self._ptz_move(0, -0.3))
-        self.ptz_down.released.connect(self._ptz_stop)
-        self.ptz_left.pressed.connect(lambda: self._ptz_move(-0.3, 0))
-        self.ptz_left.released.connect(self._ptz_stop)
-        self.ptz_right.pressed.connect(lambda: self._ptz_move(0.3, 0))
-        self.ptz_right.released.connect(self._ptz_stop)
+    # ------------------------------------------------------------------
+    # Camera list / selection
+    # ------------------------------------------------------------------
 
-    def _check_camera_status(self):
-        ip = self.ip_edit.text().strip()
-        if not ip:
-            self.status_label.setText("● No IP configured")
-            self.status_label.setStyleSheet("color: #888888; padding: 4px 0;")
-            return
+    def _migrate_if_needed(self):
+        if self._cfg.migrate_from_env():
+            self.status_bar.showMessage(
+                "Migrated old config to new format", 4000
+            )
+            self._refresh_camera_list()
 
-        def check():
-            try:
-                s = socket.create_connection((ip, 554), timeout=2)
-                s.close()
-                return True
-            except OSError:
-                return False
+    def _refresh_camera_list(self):
+        self._updating_selector = True
+        self._camera_combo.blockSignals(True)
+        self._camera_combo.clear()
 
-        def done(ok):
-            if ok:
-                self.status_label.setText("● Camera reachable")
-                self.status_label.setStyleSheet(
-                    "color: #22c55e; padding: 4px 0; font-weight: bold;")
-            else:
-                self.status_label.setText("● Camera unreachable")
-                self.status_label.setStyleSheet(
-                    "color: #ef4444; padding: 4px 0; font-weight: bold;")
-
-        self.status_label.setText("● Checking...")
-        self.status_label.setStyleSheet("color: #888888; padding: 4px 0;")
-        t = QThread(self)
-        w = _Worker(check)
-        w.moveToThread(t)
-        t.started.connect(w.run)
-        w.finished.connect(done)
-        w.finished.connect(t.quit)
-        w.finished.connect(w.deleteLater)
-        t.finished.connect(t.deleteLater)
-        t.start()
-
-    def _init_ptz(self):
-        self._cleanup_ptz()
-        ip = self.ip_edit.text().strip()
-        user = self.username_edit.text().strip()
-        password = self.password_edit.text().strip()
-        if not ip or not user or not password:
-            self.ptz_widget.setEnabled(False)
-            self.status_bar.showMessage("Enter credentials to connect", 3000)
-            return
-
-        self.ptz_widget.setEnabled(False)
-        self.status_bar.showMessage("Connecting...", 3000)
-
-        self.ptz_thread = QThread(self)
-        self.ptz_worker = PTZWorker()
-        self.ptz_worker.moveToThread(self.ptz_thread)
-        self.ptz_worker.connected.connect(self._on_ptz_connected)
-        self.ptz_worker.error.connect(self._on_ptz_error)
-        self.ptz_thread.started.connect(
-            lambda: self.ptz_worker.connect(ip, user, password))
-        self.ptz_thread.start()
-
-    def _on_ptz_connected(self, ok):
-        if ok:
-            self.ptz_widget.setEnabled(True)
-            self.status_bar.showMessage("PTZ ready", 3000)
+        cameras = self._cfg.load()
+        if not cameras:
+            self._camera_combo.addItem("— No cameras configured —", None)
         else:
-            self.ptz_widget.setEnabled(False)
-            self.status_bar.showMessage("Connection failed", 3000)
+            for cam in cameras:
+                label = f"{cam.get('name', '?')}  —  {cam.get('ip', '?.?.?.?')}"
+                self._camera_combo.addItem(label, cam.get("id"))
 
-    def _on_ptz_error(self, msg):
-        self.status_bar.showMessage(f"Error: {msg}", 5000)
+        self._camera_combo.blockSignals(False)
+        self._updating_selector = False
 
-    def _ptz_move(self, pan, tilt):
-        if self.ptz_worker:
-            self.ptz_worker.continuous_move(pan, tilt)
+        if cameras:
+            self._camera_combo.setCurrentIndex(0)
+            self._on_camera_selected(0)
+        else:
+            self._on_camera_selected(-1)
 
-    def _ptz_stop(self):
-        if self.ptz_worker:
-            self.ptz_worker.stop()
-
-    def _cleanup_ptz(self):
-        if self.ptz_thread:
-            self.ptz_thread.quit()
-            self.ptz_thread.wait(3000)
-            self.ptz_thread = None
-            self.ptz_worker = None
-
-    def _load_config(self):
-        if not CONFIG_FILE.exists():
+    def _on_camera_selected(self, index: int):
+        if self._updating_selector:
             return
-        with open(CONFIG_FILE) as f:
-            for line in f:
-                if "=" not in line:
-                    continue
-                key, _, value = line.partition("=")
-                key = key.strip()
-                val = value.strip()
-                if key == "TAPO_USER":
-                    self.username_edit.setText(val)
-                elif key == "TAPO_PASS":
-                    try:
-                        val = base64.b64decode(val).decode()
-                    except Exception:
-                        pass
-                    self.password_edit.setText(val)
-                elif key == "TAPO_IP":
-                    self.ip_edit.setText(val)
+        camera_id = self._camera_combo.itemData(index)
+        self._current_camera_id = camera_id
+        self._select_camera(camera_id)
 
-    def _save_config(self):
-        ip = self.ip_edit.text().strip()
-        if ip and not _validate_ip(ip):
-            QMessageBox.warning(self, "Invalid IP",
-                                "Please enter a valid IP address.")
+    def _select_camera(self, camera_id: int | None):
+        """Populate the control panel for the given camera."""
+        if camera_id is None:
+            self._name_label.setText("No camera selected")
+            self._ip_label.setText("—")
+            self._status_label.setText("● —")
+            self._stream_btn.setEnabled(False)
+            self._quality_combo.setEnabled(False)
+            self._set_ptz_enabled(False)
             return
-        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        encoded_pass = base64.b64encode(
-            self.password_edit.text().encode()).decode()
-        with open(CONFIG_FILE, "w") as f:
-            f.write(f"TAPO_USER={self.username_edit.text()}\n")
-            f.write(f"TAPO_PASS={encoded_pass}\n")
-            f.write(f"TAPO_IP={ip}\n")
-        os.chmod(CONFIG_FILE, 0o600)
-        self._check_camera_status()
-        self._init_ptz()
 
-    def _reset_config(self):
-        if CONFIG_FILE.exists():
-            CONFIG_FILE.unlink()
-        self.username_edit.clear()
-        self.password_edit.clear()
-        self.ip_edit.clear()
-        self._cleanup_ptz()
-        self.ptz_widget.setEnabled(False)
-        self.status_label.setText("● No IP configured")
-        self.status_label.setStyleSheet("color: #888888; padding: 4px 0;")
-        self.status_bar.showMessage("Configuration reset", 3000)
-
-    def _build_rtsp_url(self):
-        username = self.username_edit.text().strip()
-        password = self.password_edit.text().strip()
-        ip = self.ip_edit.text().strip()
-        stream = "stream1" if self.quality_combo.currentIndex() == 0 else "stream2"
-        encoded_user = urllib.parse.quote(username, safe="")
-        encoded_pass = urllib.parse.quote(password, safe="")
-        return f"rtsp://{encoded_user}:{encoded_pass}@{ip}/{stream}"
-
-    def _create_player(self):
-        if self.player:
+        camera = self._cfg.get_camera(camera_id)
+        if not camera:
             return
-        self.error_log = tempfile.NamedTemporaryFile(
-            prefix="tapitocam_", suffix=".log", delete=False)
 
-        self.player = mpv.MPV(
-            profile="fast",
-            untimed=True,
-            cache="no",
-            demuxer_readahead_secs=0,
-            vd_lavc_threads=1,
-            rtsp_transport="udp",
-            demuxer_lavf_o=(
-                "fflags=+nobuffer,"
-                "probesize=5000000,"
-                "analyzeduration=5000000"
-            ),
-            video_sync="audio",
-            log_file=self.error_log.name,
-            quiet=True,
+        name = camera.get("name", f"Camera {camera_id}")
+        ip = camera.get("ip", "?")
+        self._name_label.setText(name)
+        self._ip_label.setText(ip)
+        self._quality_combo.setCurrentIndex(
+            0 if camera.get("quality", "hd") == "hd" else 1
         )
+        self._stream_btn.setEnabled(True)
+        self._quality_combo.setEnabled(True)
 
-        self.player.register_event_callback(self._on_player_event)
+        self._sync_ui()
 
-    def _on_player_event(self, event):
-        if event.event_id == mpv.MpvEventID.END_FILE:
-            reason = event.data.reason if event.data else None
-            if reason == mpv.MpvEventEndFile.ERROR:
-                log_path = self.error_log.name if self.error_log else None
-                if log_path:
-                    error = self._check_network_error(log_path)
-                    if error:
-                        self.stream_errored.emit(error)
-            self.stream_ended.emit()
+        # Connect PTZ for this camera (brief blocking ~1-3s for ONVIF init)
+        self._connect_ptz(camera_id)
 
-    def _on_stream_ended(self):
-        self._streaming = False
-        self._set_streaming_state(False)
-        self._cleanup_log()
-
-    @Slot()
-    def _start_stream(self):
-        username = self.username_edit.text().strip()
-        password = self.password_edit.text().strip()
-        ip = self.ip_edit.text().strip()
-
-        if not username or not password or not ip:
-            QMessageBox.warning(self, "Missing Fields",
-                                "Please enter camera credentials and IP.")
+    def _sync_ui(self):
+        """Update the stream button and status label to reflect reality."""
+        cam_id = self._current_camera_id
+        if cam_id is None:
             return
 
-        if not _validate_ip(ip):
-            QMessageBox.warning(self, "Invalid IP",
-                                "Please enter a valid IP address.")
-            return
+        is_streaming = cam_id in self._processes
+        self._stream_btn.setText("■ Stop Stream" if is_streaming else "▶ Open Stream")
 
-        self._create_player()
-        rtsp_url = self._build_rtsp_url()
-        try:
-            self.player.play(rtsp_url)
-        except Exception as e:
-            QMessageBox.critical(self, "Error",
-                                 f"Failed to start stream:\n{e}")
-            return
+        if is_streaming:
+            self._status_label.setText("● Streaming")
+            self._status_label.setStyleSheet(
+                "color: #22c55e; padding: 2px 0; font-weight: bold;"
+            )
+        else:
+            self._status_label.setText("● Ready")
+            self._status_label.setStyleSheet("color: #888888; padding: 2px 0;")
 
-        self._streaming = True
-        self._set_streaming_state(True)
-        self.status_bar.showMessage("Stream started", 3000)
+        # Update Start All / Stop All button states
+        cameras = self._cfg.load()
+        has_any = len(cameras) > 0
+        any_streaming = len(self._processes) > 0
+        all_streaming = has_any and len(self._processes) >= len(cameras)
 
-    @Slot()
-    def _stop_stream(self):
-        if self.player:
-            try:
-                self.player.stop()
-            except Exception:
-                pass
-            try:
-                self.player.terminate()
-            except Exception:
-                pass
-            self.player = None
-        self._cleanup_log()
-        self._streaming = False
-        self._set_streaming_state(False)
-        self.status_bar.showMessage("Stream stopped", 3000)
+        self._start_all_btn.setEnabled(has_any and not all_streaming)
+        self._stop_all_btn.setEnabled(any_streaming)
+
+    # ------------------------------------------------------------------
+    # Stream control (subprocess mpv)
+    # ------------------------------------------------------------------
 
     def _toggle_stream(self):
-        if self._streaming:
-            self._stop_stream()
+        cam_id = self._current_camera_id
+        if cam_id is None:
+            return
+        if cam_id in self._processes:
+            self._stop_camera(cam_id)
         else:
-            self._start_stream()
+            self._start_camera(cam_id)
 
-    def _set_streaming_state(self, streaming):
-        self.stream_btn.setText("■  Stop Stream" if streaming else "▶  Open Stream")
-        self.save_btn.setEnabled(not streaming)
-        self.reset_btn.setEnabled(not streaming)
-        self.username_edit.setReadOnly(streaming)
-        self.password_edit.setReadOnly(streaming)
-        self.ip_edit.setReadOnly(streaming)
-        self.quality_combo.setEnabled(not streaming)
-        self.status_bar.showMessage(
-            "Streaming" if streaming else "Ready", 3000)
+    def _start_camera(self, camera_id: int):
+        """Launch mpv for a camera in a standalone window."""
+        camera = self._cfg.get_camera(camera_id)
+        if not camera:
+            return
 
-    def _check_network_error(self, log_path):
+        if camera_id in self._processes:
+            return  # already running
+
+        username = camera.get("username", "")
+        password = camera.get("password", "")
+        ip = camera.get("ip", "")
+        quality_idx = self._quality_combo.currentIndex()
+        stream = "stream1" if quality_idx == 0 else "stream2"
+
+        encoded_user = urllib.parse.quote(username, safe="")
+        encoded_pass = urllib.parse.quote(password, safe="")
+        rtsp_url = f"rtsp://{encoded_user}:{encoded_pass}@{ip}/{stream}"
+
+        title = camera.get("name", f"Camera {camera_id}")
+
+        mpv_opts = [
+            "mpv",
+            f"--title=tapitoCAM — {title}",
+            "--profile=fast",
+            "--untimed",
+            "--cache=no",
+            "--demuxer-readahead-secs=0",
+            "--vd-lavc-threads=1",
+            "--rtsp-transport=udp",
+            "--demuxer-lavf-o-add=fflags=+nobuffer",
+            "--demuxer-lavf-o-add=probesize=5000000",
+            "--demuxer-lavf-o-add=analyzeduration=5000000",
+            "--video-sync=audio",
+            rtsp_url,
+        ]
+
         try:
-            with open(log_path) as f:
-                for line in f:
-                    for pattern in NETWORK_ERRORS:
-                        if re.search(pattern, line, re.IGNORECASE):
-                            return line.strip()
-        except OSError:
-            pass
-        return None
+            proc = subprocess.Popen(
+                mpv_opts,
+                start_new_session=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._processes[camera_id] = proc
+            self.status_bar.showMessage(f"Started: {title}", 3000)
+        except FileNotFoundError:
+            QMessageBox.critical(
+                self, "mpv Not Found",
+                "mpv is not installed. Install it with:\n"
+                "  sudo apt install mpv"
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to start mpv:\n{e}")
 
-    @Slot(str)
-    def _handle_network_error(self, error_msg):
-        self.status_bar.showMessage("Connection Error", 5000)
-        reply = QMessageBox.question(
-            self, "Connection Error",
-            f"Network error detected:\n{error_msg}\n\n"
-            "Would you like to enter a different camera IP?",
-            QMessageBox.Yes | QMessageBox.No)
+        self._sync_ui()
 
-        if reply == QMessageBox.Yes:
-            ip, ok = QInputDialog.getText(
-                self, "Change Camera IP",
-                "Enter new camera IP:",
-                text=self.ip_edit.text())
-            if ok and ip.strip():
-                self.ip_edit.setText(ip.strip())
-                self.status_bar.showMessage(
-                    "IP updated. Click Start to retry.", 5000)
-
-    def _cleanup_player(self):
-        if self.player:
+    def _stop_camera(self, camera_id: int):
+        """Kill mpv for a camera."""
+        proc = self._processes.pop(camera_id, None)
+        if proc is None:
+            return
+        try:
+            # Kill the entire process group
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            proc.wait(timeout=3)
+        except Exception:
             try:
-                self.player.terminate()
+                proc.kill()
             except Exception:
                 pass
-            self.player = None
-        self._cleanup_log()
 
-    def _cleanup_log(self):
-        if self.error_log:
-            try:
-                self.error_log.close()
-                os.unlink(self.error_log.name)
-            except OSError:
-                pass
-            self.error_log = None
+        camera = self._cfg.get_camera(camera_id)
+        name = camera.get("name", f"Camera {camera_id}") if camera else f"Camera {camera_id}"
+        self.status_bar.showMessage(f"Stopped: {name}", 3000)
+        self._sync_ui()
+
+    def _start_all(self):
+        cameras = self._cfg.load()
+        count = 0
+        for cam in cameras:
+            cid = cam["id"]
+            if cid not in self._processes:
+                self._start_camera(cid)
+                count += 1
+        if count:
+            self.status_bar.showMessage(f"Started {count} camera(s)", 3000)
+
+    def _stop_all(self):
+        count = len(self._processes)
+        for cid in list(self._processes.keys()):
+            self._stop_camera(cid)
+        if count:
+            self.status_bar.showMessage(f"Stopped {count} camera(s)", 3000)
+
+    # ------------------------------------------------------------------
+    # PTZ  (synchronous — no threads, UI-safe)
+    # ------------------------------------------------------------------
+
+    def _connect_ptz(self, camera_id: int):
+        """Blocking ONVIF connect for a camera.  Called from main thread."""
+        # Don't re-connect if already cached
+        if camera_id in self._ptz_controllers:
+            ctrl = self._ptz_controllers[camera_id]
+            if ctrl.is_connected:
+                self._set_ptz_enabled(camera_id in self._processes)
+                self.status_bar.showMessage("PTZ ready", 3000)
+                return
+
+        camera = self._cfg.get_camera(camera_id)
+        if not camera:
+            return
+        ip = camera.get("ip", "")
+        user = camera.get("username", "")
+        password = camera.get("password", "")
+        if not ip or not user or not password:
+            return
+
+        self.status_bar.showMessage("Connecting PTZ...", 2000)
+        ctrl = PTZController()
+        ok = ctrl.connect(ip, user, password)
+        self._ptz_controllers[camera_id] = ctrl
+        if ok:
+            self._set_ptz_enabled(camera_id in self._processes)
+            self.status_bar.showMessage("PTZ ready", 3000)
+        else:
+            self._set_ptz_enabled(False)
+            self.status_bar.showMessage("PTZ connection failed", 3000)
+
+    def _set_ptz_enabled(self, enabled: bool):
+        for btn in (self._ptz_up, self._ptz_down, self._ptz_left,
+                    self._ptz_right, self._ptz_stop_btn):
+            btn.setEnabled(enabled)
+
+    def _ptz_move(self, pan: float, tilt: float):
+        if self._current_camera_id is None:
+            return
+        ctrl = self._ptz_controllers.get(self._current_camera_id)
+        if ctrl:
+            ctrl.continuous_move(pan, tilt)
+
+    def _ptz_stop(self):
+        if self._current_camera_id is None:
+            return
+        ctrl = self._ptz_controllers.get(self._current_camera_id)
+        if ctrl:
+            ctrl.stop()
+
+    # ------------------------------------------------------------------
+    # Actions
+    # ------------------------------------------------------------------
+
+    def _on_manage_cameras(self):
+        self._stop_all()
+        dialog = CameraManagerDialog(self, self._cfg)
+        before = [str(c) for c in self._cfg.load()]
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            cameras = self._cfg.load()
+            after = [str(c) for c in cameras]
+            if before != after:
+                self._refresh_camera_list()
+                self.status_bar.showMessage("Camera config updated", 3000)
+        else:
+            self._refresh_camera_list()
+
+    # ------------------------------------------------------------------
+    # Cleanup
+    # ------------------------------------------------------------------
 
     def closeEvent(self, event):
-        self._cleanup_ptz()
-        self._cleanup_player()
+        self._refresh_timer.stop()
+        self._stop_all()
+        for ctrl in self._ptz_controllers.values():
+            ctrl.cleanup()
+        self._ptz_controllers.clear()
         super().closeEvent(event)
 
+
+# ===========================================================================
+# App entry point
+# ===========================================================================
 
 def main():
     app = QApplication(sys.argv)
@@ -588,30 +540,6 @@ def main():
             color: #666666;
             border-color: #2a2a2a;
         }
-        QPushButton:checked {
-            background: #3b82f6;
-            color: #ffffff;
-            border-color: #3b82f6;
-        }
-        QLineEdit {
-            border: 1px solid #3a3a3a;
-            border-radius: 6px;
-            padding: 8px 12px;
-            background: #252525;
-            color: #e0e0e0;
-            selection-background-color: #3b82f6;
-        }
-        QLineEdit:focus {
-            border-color: #3b82f6;
-            background: #2a2a2a;
-        }
-        QLineEdit:disabled {
-            background: #1a1a1a;
-            color: #666666;
-        }
-        QLineEdit::placeholder {
-            color: #777777;
-        }
         QComboBox {
             border: 1px solid #3a3a3a;
             border-radius: 6px;
@@ -625,8 +553,6 @@ def main():
         QComboBox::drop-down {
             border: none;
             width: 28px;
-            subcontrol-origin: padding;
-            subcontrol-position: top right;
         }
         QComboBox::down-arrow {
             image: none;
@@ -641,6 +567,9 @@ def main():
             selection-background-color: #3b82f6;
             border: 1px solid #3a3a3a;
             outline: none;
+        }
+        QLabel {
+            color: #e0e0e0;
         }
         QStatusBar {
             background: #1a1a1a;
