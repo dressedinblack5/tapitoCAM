@@ -320,9 +320,26 @@ class MainWindow(QMainWindow):
         self._stop_all_btn.setEnabled(any_streaming)
 
     def _prune_dead_processes(self):
-        """Remove mpv processes that have exited and report failures."""
+        """Remove mpv processes that have exited or report connection errors."""
         dead = []
         for cid, proc in list(self._processes.items()):
+            if proc.stderr:
+                try:
+                    data = proc.stderr.read(4096)
+                except Exception:
+                    data = b""
+                if data:
+                    text = data.decode("utf-8", errors="replace").strip()
+                    if text and self._is_mpv_connection_error(text):
+                        self._stop_camera(cid)
+                        camera = self._cfg.get_camera(cid)
+                        name = camera.get("name", f"Camera {cid}") if camera else (f"Camera {cid}")
+                        short = text.replace("\n", " ")[:120]
+                        self.status_bar.showMessage(
+                            f"Stream error: {name} — {short}", 6000
+                        )
+                        continue
+
             rc = proc.poll()
             if rc is not None:
                 dead.append((cid, rc))
@@ -336,6 +353,25 @@ class MainWindow(QMainWindow):
                 )
             else:
                 self.status_bar.showMessage(f"Stream ended: {name}", 3000)
+
+    @staticmethod
+    def _is_mpv_connection_error(text: str) -> bool:
+        """Return True if *text* from mpv stderr indicates a connection failure."""
+        lower = text.lower()
+        triggers = (
+            "failed to connect",
+            "connection refused",
+            "connection timed out",
+            "error while opening",
+            "cannot open",
+            "no route to host",
+            "host unreachable",
+            "network is unreachable",
+            "name or service not known",
+            "resolve failed",
+            "connection reset",
+        )
+        return any(t in lower for t in triggers)
 
     # ------------------------------------------------------------------
     # Stream control (subprocess mpv)
@@ -392,8 +428,9 @@ class MainWindow(QMainWindow):
                 mpv_opts,
                 start_new_session=True,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
             )
+            os.set_blocking(proc.stderr.fileno(), False)
             self._processes[camera_id] = proc
             self.status_bar.showMessage(f"Started: {title}", 3000)
         except FileNotFoundError:
