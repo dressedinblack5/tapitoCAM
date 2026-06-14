@@ -3,3 +3,5 @@
 docs/
 __pycache__/
 *.pyc
+.ruff_cache/
+.omo/run-continuation/
