@@ -288,7 +288,12 @@ class MainWindow(QMainWindow):
         self._connect_ptz(camera_id)
 
     def _sync_ui(self):
-        """Update the stream button and status label to reflect reality."""
+        """Update the stream button and status label to reflect reality.
+
+        Also prunes any mpv processes that have exited (connection errors).
+        """
+        self._prune_dead_processes()
+
         cam_id = self._current_camera_id
         if cam_id is None:
             return
@@ -313,6 +318,24 @@ class MainWindow(QMainWindow):
 
         self._start_all_btn.setEnabled(has_any and not all_streaming)
         self._stop_all_btn.setEnabled(any_streaming)
+
+    def _prune_dead_processes(self):
+        """Remove mpv processes that have exited and report failures."""
+        dead = []
+        for cid, proc in list(self._processes.items()):
+            rc = proc.poll()
+            if rc is not None:
+                dead.append((cid, rc))
+        for cid, rc in dead:
+            self._processes.pop(cid, None)
+            camera = self._cfg.get_camera(cid)
+            name = camera.get("name", f"Camera {cid}") if camera else f"Camera {cid}"
+            if rc != 0:
+                self.status_bar.showMessage(
+                    f"Stream failed: {name} (mpv exited with code {rc})", 5000
+                )
+            else:
+                self.status_bar.showMessage(f"Stream ended: {name}", 3000)
 
     # ------------------------------------------------------------------
     # Stream control (subprocess mpv)
