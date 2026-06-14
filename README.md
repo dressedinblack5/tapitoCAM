@@ -1,18 +1,27 @@
 # tapitoCAM
 
-TP-Link Tapo Camera RTSP Client for Linux.
+TP-Link Tapo Camera RTSP Client for Linux — multi-camera control center.
 
 ![CLI Preview](assets/cli-preview.png)
 ![GUI Preview](assets/gui-preview.png)
 ![Tapo Camera Preview](assets/tc-preview.png)
 
+## Features
+
+- **Multi-camera support** — add, edit, and remove any number of Tapo cameras
+- **Standalone mpv streaming** — one mpv window per camera (no embedded video; works great on Wayland)
+- **PTZ control** — pan, tilt, zoom via ONVIF for each camera
+- **HD / SD quality** — select stream1 (HD) or stream2 (SD) per camera
+- **Camera Manager** — dedicated dialog for managing camera list, credentials, and IPs
+- **CLI** — single-camera RTSP viewer for quick terminal access
+
 ## Prerequisites
 
 - **RTSP-compatible Tapo camera** (e.g., C200, C310, C320WS)
 - **mpv** — video player (`apt install mpv`)
-- **Python 3.10+ and PySide6** (for GUI):
+- **Python 3.10+** with PySide6 and onvif-zeep (for GUI):
   ```bash
-  pip install pyside6 python-mpv onvif-zeep
+  pip install pyside6 onvif-zeep
   ```
 
 You also need to create a dedicated **Camera Account** in the Tapo app for RTSP access:
@@ -46,11 +55,35 @@ cd tapitoCAM
 ./tapitocam_gui.py   # GUI
 ```
 
-## First run
+## GUI Usage
 
-On first launch you'll be prompted for your Tapo camera username, password,
-and local IP address.  Credentials are saved to
-`~/.config/tapitocam/.tapitocam.env` (permissions `600`).
+### First launch
+
+On first launch the GUI shows an empty control panel. Click **Manage** to
+open the Camera Manager dialog and add your first camera.
+
+### Camera Manager
+
+- **+ Add** — enter a name, username, password, IP, and quality (HD/SD)
+- **✏ Edit** — modify an existing camera's settings
+- **✕ Remove** — delete a camera
+- IP addresses are validated on save (each octet 0–255)
+- Passwords are base64-encoded in `~/.config/tapitocam/cameras.json`
+
+### Streaming
+
+- Select a camera from the dropdown, click **▶ Open Stream**
+- mpv launches in its own window (one per camera)
+- Use **■ Stop Stream** to close it, or **Start All / Stop All** for batch control
+- If mpv cannot connect (wrong IP, unreachable host), the GUI shows the
+  connection error on the status bar and kills the stuck process within 2 seconds
+
+### PTZ
+
+Pan, tilt, and zoom buttons fire ONVIF continuous moves. The camera must
+support ONVIF (most Tapo C-series models do). PTZ connects synchronously
+on camera selection — the GUI freezes for ~1–3 seconds during initial
+ONVIF handshake.
 
 ### CLI Options
 
@@ -78,8 +111,11 @@ rm -rf ~/.config/tapitocam
 
 ## Notes
 
-- Username and password are URL-encoded automatically to handle special characters.
-- IP addresses are validated (each octet 0-255).
-- Temporary mpv logs are cleaned up automatically on exit.
-- The GUI supports PTZ (pan/tilt/zoom) control via ONVIF and stream quality selection.
+- Config is stored in `~/.config/tapitocam/cameras.json` (one per system).
+  Legacy `.tapitocam.env` is auto-migrated on first launch.
+- Username and password are URL-encoded automatically for the RTSP URL.
+- mpv is launched as a standalone subprocess per camera. This avoids Wayland
+  window-embedding issues and keeps each stream isolated.
+- Temporary mpv logs are discarded; connection errors are captured from
+  stderr and displayed on the GUI status bar.
 - Use `stream1` for HD and `stream2` for SD (useful on slow networks).
