@@ -1,3 +1,4 @@
 pyside6>=6.5
 python-mpv>=1.0
 onvif-zeep>=0.2.7
+keyring>=23.0

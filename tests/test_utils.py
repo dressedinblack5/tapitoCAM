@@ -1,9 +1,17 @@
 #!/usr/bin/env python3
 """Tests for the shared utils module."""
 
+import os
 import unittest
 
-from utils import is_auth_error, is_mpv_connection_error, validate_ip
+from utils import (
+    get_mpv_playlist_command,
+    is_auth_error,
+    is_mpv_connection_error,
+    sanitize_onvif_error,
+    validate_ip,
+    write_rtsp_playlist,
+)
 
 
 class TestAuthError(unittest.TestCase):
@@ -70,6 +78,92 @@ class TestValidateIP(unittest.TestCase):
 
     def test_invalid_ip_format(self):
         self.assertFalse(validate_ip("not.an.ip"))
+
+
+# ---------------------------------------------------------------------------
+# Playlist helpers
+# ---------------------------------------------------------------------------
+
+
+class TestPlaylistHelpers(unittest.TestCase):
+    """Test RTSP playlist file creation and mpv command building."""
+
+    def test_write_rtsp_playlist_creates_file(self):
+        path = write_rtsp_playlist("rtsp://user:pass@1.2.3.4/stream1")
+        try:
+            self.assertTrue(os.path.isfile(path))
+            content = open(path).read()
+            self.assertIn("rtsp://user:pass@1.2.3.4/stream1", content)
+        finally:
+            os.unlink(path)
+
+    def test_write_rtsp_playlist_permissions(self):
+        path = write_rtsp_playlist("rtsp://user:pass@1.2.3.4/stream1")
+        try:
+            mode = os.stat(path).st_mode & 0o777
+            self.assertEqual(mode, 0o600)
+        finally:
+            os.unlink(path)
+
+    def test_get_mpv_playlist_command_includes_playlist_flag(self):
+        cmd = get_mpv_playlist_command("Front Door", "/tmp/test.m3u")
+        self.assertEqual(cmd[0], "mpv")
+        self.assertIn("--playlist=/tmp/test.m3u", cmd)
+        # Must NOT contain the URL directly
+        self.assertNotIn("rtsp://", " ".join(cmd))
+
+    def test_get_mpv_playlist_command_title(self):
+        cmd = get_mpv_playlist_command("Camera 1", "/tmp/test.m3u")
+        title_arg = next(a for a in cmd if a.startswith("--title="))
+        self.assertIn("tapitoCAM", title_arg)
+        self.assertIn("Camera 1", title_arg)
+
+
+# ---------------------------------------------------------------------------
+# ONVIF error sanitizer
+# ---------------------------------------------------------------------------
+
+
+class TestSanitizeOnvifError(unittest.TestCase):
+    """Test sanitize_onvif_error strips credential-like patterns."""
+
+    def test_strips_url_credentials(self):
+        msg = "Fault: http://admin:secret@192.168.1.100:2020/onvif/device_service"
+        sanitized = sanitize_onvif_error(msg)
+        self.assertNotIn("admin", sanitized)
+        self.assertNotIn("secret", sanitized)
+        self.assertIn("***:***@", sanitized)
+
+    def test_strips_password_param(self):
+        msg = "HTTPError: password=mysecret"
+        sanitized = sanitize_onvif_error(msg)
+        self.assertNotIn("mysecret", sanitized)
+        self.assertIn("password=***", sanitized)
+
+    def test_strips_passwd_param(self):
+        msg = "Error: passwd=secret123"
+        sanitized = sanitize_onvif_error(msg)
+        self.assertIn("passwd=***", sanitized)
+
+    def test_preserves_safe_text(self):
+        msg = "Connection refused"
+        sanitized = sanitize_onvif_error(msg)
+        self.assertEqual(sanitized, "Connection refused")
+
+    def test_truncates_long_messages(self):
+        msg = "x" * 200
+        sanitized = sanitize_onvif_error(msg)
+        self.assertLessEqual(len(sanitized), 150)
+
+    def test_replaces_newlines(self):
+        msg = "Error:\nline1\nline2"
+        sanitized = sanitize_onvif_error(msg)
+        self.assertNotIn("\n", sanitized)
+
+    def test_password_case_insensitive(self):
+        msg = "error: PASSWORD=hunter2"
+        sanitized = sanitize_onvif_error(msg)
+        self.assertNotIn("hunter2", sanitized)
 
 
 if __name__ == "__main__":

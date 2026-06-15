@@ -1,24 +1,18 @@
 #!/usr/bin/env python3
-"""CLI helper for tapitocam.sh — loads camera config from JSON and prints shell-parseable output."""
+"""CLI helper for tapitocam.sh — loads camera config and prints shell-parseable output."""
 
-import json
 import sys
 from pathlib import Path
 
 CONFIG_DIR = Path.home() / ".config" / "tapitocam"
-CONFIG_FILE = CONFIG_DIR / "cameras.json"
-
 OLD_ENV_FILE = CONFIG_DIR / ".tapitocam.env"
 
 
 def load_json_config() -> list[dict]:
-    """Load cameras from JSON config."""
-    try:
-        with open(CONFIG_FILE) as f:
-            data = json.load(f)
-        return data.get("cameras", [])
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return []
+    """Load cameras via ConfigManager (keyring-aware)."""
+    from cameraconfig import ConfigManager
+
+    return ConfigManager(CONFIG_DIR).load()
 
 
 def load_env_config() -> dict | None:

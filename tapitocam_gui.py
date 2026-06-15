@@ -40,9 +40,11 @@ from cameratile import PTZController  # noqa: E402
 from styles import DARK_THEME  # noqa: E402
 from utils import (  # noqa: E402
     build_rtsp_url,
-    get_mpv_command,
+    get_mpv_playlist_command,
     is_auth_error,
     is_mpv_connection_error,
+    sanitize_onvif_error,
+    write_rtsp_playlist,
 )
 
 
@@ -60,6 +62,9 @@ class MainWindow(QMainWindow):
 
         # camera_id -> subprocess.Popen (shared with global crash handler)
         self._processes: dict[int, subprocess.Popen] = _process_registry
+
+        # camera_id -> playlist temp file path (cleaned up on stop)
+        self._playlist_files: dict[int, str] = {}
 
         # camera_id -> PTZController (synchronous, no threads)
         self._ptz_controllers: dict[int, PTZController] = {}
@@ -415,7 +420,9 @@ class MainWindow(QMainWindow):
 
         rtsp_url = build_rtsp_url(username, password, ip, stream)
         title = camera.get("name", f"Camera {camera_id}")
-        mpv_opts = get_mpv_command(title, rtsp_url)
+
+        playlist_path = write_rtsp_playlist(rtsp_url)
+        mpv_opts = get_mpv_playlist_command(title, playlist_path)
 
         try:
             proc = subprocess.Popen(
@@ -427,14 +434,17 @@ class MainWindow(QMainWindow):
             if proc.stderr:
                 os.set_blocking(proc.stderr.fileno(), False)
             self._processes[camera_id] = proc
+            self._playlist_files[camera_id] = playlist_path
             self.status_bar.showMessage(f"Started: {title}", 3000)
         except FileNotFoundError:
+            os.unlink(playlist_path)
             QMessageBox.critical(
                 self,
                 "mpv Not Found",
                 "mpv is not installed. Install it with:\n  sudo apt install mpv",
             )
         except Exception as e:
+            os.unlink(playlist_path)
             QMessageBox.critical(self, "Error", f"Failed to start mpv:\n{e}")
 
         self._sync_ui()
@@ -442,6 +452,15 @@ class MainWindow(QMainWindow):
     def _stop_camera(self, camera_id: int):
         """Kill mpv for a camera."""
         proc = self._processes.pop(camera_id, None)
+        playlist = self._playlist_files.pop(camera_id, None)
+
+        # Clean up the temp playlist file (prevents credential leakage on disk)
+        if playlist:
+            try:
+                os.unlink(playlist)
+            except OSError:
+                pass
+
         if proc is None:
             return
         try:
@@ -522,7 +541,7 @@ class MainWindow(QMainWindow):
                 if is_auth_error(error):
                     msg = f"PTZ auth failed: {name} — check camera credentials"
                 else:
-                    msg = f"PTZ connection failed: {error}"
+                    msg = f"PTZ connection failed: {sanitize_onvif_error(error)}"
                 self.status_bar.showMessage(msg, 3000)
 
         ctrl.connect_async(ip, user, password, on_connected)
@@ -578,6 +597,13 @@ class MainWindow(QMainWindow):
         for ctrl in self._ptz_controllers.values():
             ctrl.cleanup()
         self._ptz_controllers.clear()
+        # Clean up any remaining playlist temp files
+        for path in self._playlist_files.values():
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+        self._playlist_files.clear()
         super().closeEvent(event)
 
 

@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Shared utilities for tapitoCAM."""
 
+import os
+import re
+import tempfile
 import urllib.parse
 
 
@@ -98,11 +101,59 @@ MPV_OPTIONS = [
 ]
 
 
-def get_mpv_command(title: str, rtsp_url: str) -> list[str]:
-    """Return the mpv command list for a camera stream."""
+def write_rtsp_playlist(rtsp_url: str) -> str:
+    """Write an RTSP URL to a private temp file and return the path.
+
+    The file is created with ``0o600`` permissions and contains only
+    the URL.  Pass the returned path to `get_mpv_playlist_command`.
+    The caller **must** call ``os.unlink(path)`` after mpv has started
+    (or on error) to avoid leaving credentials on disk.
+    """
+    fd, path = tempfile.mkstemp(suffix=".m3u", prefix="tapitocam_")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(rtsp_url + "\n")
+    except Exception:
+        os.unlink(path)
+        raise
+    os.chmod(path, 0o600)
+    return path
+
+
+def get_mpv_playlist_command(title: str, playlist_path: str) -> list[str]:
+    """Return the mpv command list using a playlist file (no credentials in argv)."""
     return [
         "mpv",
         f"--title=tapitoCAM — {title}",
         *MPV_OPTIONS,
-        rtsp_url,
+        f"--playlist={playlist_path}",
     ]
+
+
+# ---------------------------------------------------------------------------
+# ONVIF error sanitizer
+# ---------------------------------------------------------------------------
+
+# Regex matching user:password@ embedded in URLs like
+# ``http://admin:secret@192.168.1.100/onvif``
+_URL_CREDENTIALS_RE = re.compile(r"://[^@:\s]+:[^@\s]+@")
+
+
+def sanitize_onvif_error(msg: str) -> str:
+    """Strip credential-like patterns from an ONVIF error message.
+
+    Also shortens the message to a single line (max 150 chars) so it
+    fits in the status bar without leaking sensitive data.
+    """
+    sanitized = _URL_CREDENTIALS_RE.sub("://***:***@", msg)
+    # Replace any remaining password=XXX or passwd=XXX
+    sanitized = re.sub(
+        r"(?i)(password|passwd|pass)=[^\s&,;:]+",
+        r"\1=***",
+        sanitized,
+    )
+    # Remove newlines and truncate
+    sanitized = sanitized.replace("\n", " ").replace("\r", "")
+    if len(sanitized) > 150:
+        sanitized = sanitized[:147] + "..."
+    return sanitized

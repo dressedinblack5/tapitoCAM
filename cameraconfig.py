@@ -10,6 +10,7 @@ from utils import validate_ip
 
 
 CONFIG_DIR_DEFAULT = Path.home() / ".config" / "tapitocam"
+KEYRING_SERVICE = "tapitocam"
 
 
 class ConfigManager:
@@ -32,13 +33,61 @@ class ConfigManager:
           ]
         }
 
-    Passwords are stored base64-encoded using the same scheme as the original
-    ``.tapitocam.env`` file for backward compatibility.
+    Passwords are **preferred** stored in the OS keyring via the ``keyring``
+    library (GNOME Keyring, KDE Wallet, macOS Keychain, etc.).  The JSON file
+    keeps a base64-encoded copy as a fallback when keyring is unavailable.
     """
 
     def __init__(self, config_dir: Path | None = None):
         self.config_dir = Path(config_dir) if config_dir else CONFIG_DIR_DEFAULT
         self.config_file = self.config_dir / "cameras.json"
+        self._keyring = self._init_keyring()
+
+    # ------------------------------------------------------------------
+    # Keyring helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _init_keyring():
+        """Try to import keyring. Returns the module or None."""
+        try:
+            import keyring  # noqa: F811
+            return keyring
+        except ImportError:
+            return None
+
+    def _keyring_store(self, camera_id: int, password: str):
+        """Store password in OS keyring. No-op if keyring is unavailable."""
+        if self._keyring is None:
+            return
+        try:
+            self._keyring.set_password(
+                KEYRING_SERVICE, f"camera_{camera_id}", password
+            )
+        except Exception:
+            pass  # keyring unavailable (e.g. headless, no DBus)
+
+    def _keyring_get(self, camera_id: int) -> str | None:
+        """Retrieve password from OS keyring. Returns None on any failure."""
+        if self._keyring is None:
+            return None
+        try:
+            return self._keyring.get_password(
+                KEYRING_SERVICE, f"camera_{camera_id}"
+            )
+        except Exception:
+            return None
+
+    def _keyring_delete(self, camera_id: int):
+        """Remove password from OS keyring. No-op if keyring is unavailable."""
+        if self._keyring is None:
+            return
+        try:
+            self._keyring.delete_password(
+                KEYRING_SERVICE, f"camera_{camera_id}"
+            )
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # I/O
@@ -48,20 +97,68 @@ class ConfigManager:
         """Read the camera list from the JSON config file.
 
         Returns an empty list if the file does not exist or is malformed.
+        Passwords are resolved from the OS keyring when available,
+        falling back to the base64-encoded field in JSON.
         """
         try:
             with open(self.config_file) as f:
                 data = json.load(f)
-            return data.get("cameras", [])
         except (FileNotFoundError, json.JSONDecodeError, OSError):
             return []
 
+        cameras = data.get("cameras", [])
+
+        # Resolve passwords: keyring first, then base64 fallback
+        for cam in cameras:
+            cid = cam.get("id")
+            if cid is None:
+                continue
+            keyring_pwd = self._keyring_get(cid)
+            if keyring_pwd:
+                cam["password"] = keyring_pwd
+            else:
+                # Decode the stored base64 password (backward compatible)
+                encoded = cam.get("password", "")
+                if encoded:
+                    try:
+                        cam["password"] = base64.b64decode(encoded).decode()
+                    except Exception:
+                        pass  # leave as-is if not valid base64
+                # Migrate existing password into keyring for next time
+                if self._keyring and cam.get("password"):
+                    self._keyring_store(cid, cam["password"])
+
+        return cameras
+
     def save(self, cameras: list[dict]) -> None:
-        """Atomically write the camera list to the JSON config file."""
+        """Atomically write the camera list to the JSON config file.
+
+        Passwords are stored in the OS keyring; a base64-encoded copy is
+        kept in JSON for fallback when keyring is unavailable.
+        """
+        # Persist passwords to keyring
+        for cam in cameras:
+            cid = cam.get("id")
+            pwd = cam.get("password")
+            if cid is not None and pwd:
+                self._keyring_store(cid, pwd)
+
+        # Write JSON with base64-encoded passwords (fallback)
+        stored = []
+        for cam in cameras:
+            copy = dict(cam)
+            pwd = copy.get("password", "")
+            if pwd:
+                copy["password"] = base64.b64encode(pwd.encode()).decode()
+            else:
+                # Camera without password (shouldn't happen, but be safe)
+                copy.pop("password", None)
+            stored.append(copy)
+
         self.config_dir.mkdir(parents=True, exist_ok=True)
         tmp = self.config_file.with_suffix(".json.tmp")
         with open(tmp, "w") as f:
-            json.dump({"version": 1, "cameras": cameras}, f, indent=2)
+            json.dump({"version": 1, "cameras": stored}, f, indent=2)
         os.replace(tmp, self.config_file)
         os.chmod(self.config_file, 0o600)
 
@@ -105,6 +202,7 @@ class ConfigManager:
         cameras = [c for c in cameras if c["id"] != camera_id]
         if len(cameras) < before:
             self.save(cameras)
+            self._keyring_delete(camera_id)
             return True
         return False
 
