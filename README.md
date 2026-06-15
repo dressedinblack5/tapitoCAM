@@ -10,6 +10,7 @@ TP-Link Tapo Camera RTSP Client for Linux — multi-camera control center.
 - **Multi-camera support** — add, edit, and remove any number of Tapo cameras
 - **Standalone mpv streaming** — one mpv window per camera (no embedded video; works great on Wayland)
 - **Full PTZ control** — pan, tilt, zoom, presets via ONVIF
+- **Motion detection** — PullPoint event polling with live indicator
 - **HD / SD quality** — select stream1 (HD) or stream2 (SD) per camera
 - **Camera Manager** — dedicated dialog for managing camera list, credentials, and IPs
 - **CLI** — command-line RTSP viewer with quality selection
@@ -78,6 +79,8 @@ Click **Manage** to open the Camera Manager and add your first camera.
 - **■ Stop Stream** to close, or **Start All / Stop All** for batch
 - The RTSP URL is never exposed on the command line — credentials are
   hidden from `ps aux` and `/proc`
+- Connection errors (unreachable host, auth failure) are shown persistently
+  in the status bar until the next event
 
 ### PTZ Controls
 
@@ -87,12 +90,24 @@ Click **Manage** to open the Camera Manager and add your first camera.
          ▼              Zoom        —  press & hold 🔍+ or 🔍-
        🔍-  🔍+
 
-  [Preset ▼]  Save  Go             Presets — save position, recall later
+  [Preset ▼]  ▶  💾  🗑            Presets — recall, save (with name prompt), delete
 ```
 
 All controls are locked until the camera is streaming. PTZ connects
 asynchronously in the background — the UI stays responsive during the
 1–3 second ONVIF handshake.
+
+**Presets** are stored on the camera via ONVIF and cached locally in
+`cameras.json` to survive camera reboots. Each camera's presets are
+isolated — switching cameras loads that camera's preset list automatically.
+
+### Motion Detection
+
+The camera's built-in `CellMotionDetector` is polled via ONVIF PullPoint
+events. A motion indicator (⚫/🔴) appears in the info panel next to the
+streaming status. Detection starts when streaming begins and stops when
+the stream closes. Unreachable cameras show a one-time status bar notice
+and stop retrying.
 
 ## CLI
 
@@ -129,6 +144,8 @@ tapitocam --reset
 - ONVIF uses HTTP (no TLS) — credentials travel in cleartext over the LAN
 - CLI writes RTSP URL to temp file briefly (deleted after use, `0o600`)
 - Without keyring, config passwords are base64-encoded only (not encrypted)
+- Tapo cameras have a 1-subscription PullPoint limit; motion detection
+  retries with exponential backoff until a slot is free
 
 ## Uninstall
 
@@ -136,7 +153,8 @@ tapitocam --reset
 rm -f ~/.local/bin/tapitocam ~/.local/bin/tapitocam-gui \
       ~/.local/bin/tapitocam-cli-helper \
       ~/.local/bin/cameraconfig.py ~/.local/bin/cameradialog.py \
-      ~/.local/bin/cameratile.py ~/.local/bin/styles.py ~/.local/bin/utils.py \
+      ~/.local/bin/cameratile.py ~/.local/bin/motionmonitor.py \
+      ~/.local/bin/styles.py ~/.local/bin/utils.py \
       ~/.local/share/applications/tapitoCAM.desktop
 rm -rf ~/.config/tapitocam
 ```
@@ -148,4 +166,5 @@ rm -rf ~/.config/tapitocam
 - mpv launched as standalone subprocess per camera — no Wayland embedding issues
 - `stream1` = HD, `stream2` = SD (useful on slow networks)
 - Auth errors (wrong user/password) detected for both RTSP and PTZ connections
+- Error messages persist on the status bar until replaced by the next event
 - Compatible with Debian and Arch (packaging files in `dist/`)
