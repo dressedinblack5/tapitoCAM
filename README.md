@@ -2,7 +2,6 @@
 
 TP-Link Tapo Camera RTSP Client for Linux — multi-camera control center.
 
-![CLI Preview](assets/cli-preview.png)
 ![GUI Preview](assets/gui-preview.png)
 ![Tapo Camera Preview](assets/tc-preview.png)
 
@@ -13,7 +12,7 @@ TP-Link Tapo Camera RTSP Client for Linux — multi-camera control center.
 - **PTZ control** — pan, tilt, zoom via ONVIF for each camera
 - **HD / SD quality** — select stream1 (HD) or stream2 (SD) per camera
 - **Camera Manager** — dedicated dialog for managing camera list, credentials, and IPs
-- **CLI** — single-camera RTSP viewer for quick terminal access
+- **CLI** — multi-camera RTSP viewer with quality selection
 
 ## Prerequisites
 
@@ -81,23 +80,27 @@ open the Camera Manager dialog and add your first camera.
 ### PTZ
 
 Pan, tilt, and zoom buttons fire ONVIF continuous moves. The camera must
-support ONVIF (most Tapo C-series models do). PTZ connects synchronously
-on camera selection — the GUI freezes for ~1–3 seconds during initial
-ONVIF handshake.
+support ONVIF (most Tapo C-series models do). PTZ connects asynchronously
+in a background thread — the UI stays responsive during the 1–3 s handshake.
 
 ### CLI Options
 
 ```
 Usage: tapitocam.sh [OPTIONS]
 
-  -h, --help       Show this help message
-  -r, --reset      Reset saved configuration
-  -i, --ip IP      Set camera IP address (overrides saved config)
+  -h, --help          Show this help message
+  -r, --reset         Reset saved configuration
+  -i, --ip IP         Set camera IP address (overrides saved config)
+  -c, --camera ID     Select camera by ID (default: 0)
+  -q, --quality HD|SD Select stream quality (default: HD)
+  -l, --list          List configured cameras
 ```
 
 Examples:
 ```bash
 tapitocam -i 192.168.1.100
+tapitocam -c 1 -q sd
+tapitocam --list
 tapitocam --reset
 ```
 
@@ -105,6 +108,9 @@ tapitocam --reset
 
 ```bash
 rm -f ~/.local/bin/tapitocam ~/.local/bin/tapitocam-gui \
+      ~/.local/bin/tapitocam-cli-helper \
+      ~/.local/bin/cameraconfig.py ~/.local/bin/cameradialog.py \
+      ~/.local/bin/cameratile.py ~/.local/bin/styles.py ~/.local/bin/utils.py \
       ~/.local/share/applications/tapitoCAM.desktop
 rm -rf ~/.config/tapitocam
 ```
@@ -116,6 +122,9 @@ rm -rf ~/.config/tapitocam
 - Username and password are URL-encoded automatically for the RTSP URL.
 - mpv is launched as a standalone subprocess per camera. This avoids Wayland
   window-embedding issues and keeps each stream isolated.
-- Temporary mpv logs are discarded; connection errors are captured from
-  stderr and displayed on the GUI status bar.
+- Temporary mpv logs are discarded; connection and authorization errors are
+  captured from stderr and displayed on the GUI status bar with distinct
+  messages.
 - Use `stream1` for HD and `stream2` for SD (useful on slow networks).
+- Authorization errors (wrong username/password) are detected and shown as
+  distinct messages on the status bar for both RTSP streams and PTZ connection.

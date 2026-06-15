@@ -6,19 +6,10 @@ import json
 import os
 from pathlib import Path
 
+from utils import validate_ip
+
 
 CONFIG_DIR_DEFAULT = Path.home() / ".config" / "tapitocam"
-
-
-def _validate_ip(ip):
-    """Validate an IPv4 address (each octet 0-255)."""
-    parts = ip.split(".")
-    if len(parts) != 4:
-        return False
-    for p in parts:
-        if not p.isdigit() or not 0 <= int(p) <= 255:
-            return False
-    return True
 
 
 class ConfigManager:
@@ -175,7 +166,7 @@ class ConfigManager:
     @staticmethod
     def validate_ip(ip: str) -> bool:
         """Return True if *ip* is a valid IPv4 address."""
-        return _validate_ip(ip)
+        return validate_ip(ip)
 
     @staticmethod
     def validate_entry(entry: dict) -> tuple[bool, str]:
@@ -187,7 +178,7 @@ class ConfigManager:
         missing = [k for k in ("username", "password", "ip") if not entry.get(k)]
         if missing:
             return False, f"Missing fields: {', '.join(missing)}"
-        if not _validate_ip(entry["ip"]):
+        if not validate_ip(entry["ip"]):
             return False, f"Invalid IP address: {entry['ip']}"
         return True, ""
 

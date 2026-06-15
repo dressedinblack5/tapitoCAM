@@ -35,14 +35,29 @@ echo "[3/3] Installing tapitoCAM..."
 
 # Install scripts
 install -Dm755 "$SCRIPT_DIR/tapitocam.sh"         "$HOME/.local/bin/tapitocam"
-install -Dm755 "$SCRIPT_DIR/tapitocam_gui.py"     "$HOME/.local/bin/tapitocam-gui"
+install -Dm755 "$SCRIPT_DIR/tapitocam_gui.py"      "$HOME/.local/bin/tapitocam-gui"
+install -Dm755 "$SCRIPT_DIR/tapitocam_cli.py"      "$HOME/.local/bin/tapitocam-cli-helper"
 
-# Install desktop entry (for current user only)
-install -Dm644 "$SCRIPT_DIR/dist/tapitoCAM.desktop"    "$HOME/.local/share/applications/tapitoCAM.desktop"
+# Install shared modules (needed for imports)
+install -Dm644 "$SCRIPT_DIR/cameraconfig.py"        "$HOME/.local/bin/cameraconfig.py"
+install -Dm644 "$SCRIPT_DIR/cameradialog.py"        "$HOME/.local/bin/cameradialog.py"
+install -Dm644 "$SCRIPT_DIR/cameratile.py"          "$HOME/.local/bin/cameratile.py"
+install -Dm644 "$SCRIPT_DIR/styles.py"              "$HOME/.local/bin/styles.py"
+install -Dm644 "$SCRIPT_DIR/utils.py"               "$HOME/.local/bin/utils.py"
+
+# Install desktop entry
+DESKTOP_SOURCE="/home/dressedinblack/Escritorio/TapitoCAM.desktop"
+DESKTOP_DEST="$HOME/.local/share/applications/tapitoCAM.desktop"
+
+if [[ -f "$DESKTOP_SOURCE" ]]; then
+    install -Dm644 "$DESKTOP_SOURCE" "$DESKTOP_DEST"
+else
+    # Fallback: use dist/ template
+    install -Dm644 "$SCRIPT_DIR/dist/tapitoCAM.desktop" "$DESKTOP_DEST"
+fi
 
 # Fix desktop Exec path to point to installed location
-sed -i "s|Exec=tapitocam_gui.py|Exec=$HOME/.local/bin/tapitocam-gui|" \
-    "$HOME/.local/share/applications/tapitoCAM.desktop"
+sed -i "s|Exec=.*|Exec=$HOME/.local/bin/tapitocam-gui|" "$DESKTOP_DEST"
 
 echo ""
 echo "Done! Add ~/.local/bin to your PATH if not already:"

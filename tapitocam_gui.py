@@ -6,6 +6,7 @@ as a control panel for selecting cameras, managing PTZ, and starting /
 stopping streams.
 """
 
+import atexit
 import locale
 import os
 
@@ -15,7 +16,6 @@ locale.setlocale(locale.LC_NUMERIC, "C")
 import signal  # noqa: E402
 import subprocess  # noqa: E402
 import sys  # noqa: E402
-import urllib.parse  # noqa: E402
 
 from PySide6.QtCore import Qt, QTimer  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
@@ -37,11 +37,19 @@ from PySide6.QtWidgets import (  # noqa: E402
 from cameraconfig import ConfigManager  # noqa: E402
 from cameradialog import CameraManagerDialog  # noqa: E402
 from cameratile import PTZController  # noqa: E402
+from styles import DARK_THEME  # noqa: E402
+from utils import (  # noqa: E402
+    build_rtsp_url,
+    get_mpv_command,
+    is_auth_error,
+    is_mpv_connection_error,
+)
 
 
 # ===========================================================================
 # Main Window
 # ===========================================================================
+
 
 class MainWindow(QMainWindow):
     """Control center for multiple Tapo cameras."""
@@ -50,8 +58,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._cfg = ConfigManager()
 
-        # camera_id -> subprocess.Popen
-        self._processes: dict[int, subprocess.Popen] = {}
+        # camera_id -> subprocess.Popen (shared with global crash handler)
+        self._processes: dict[int, subprocess.Popen] = _process_registry
 
         # camera_id -> PTZController (synchronous, no threads)
         self._ptz_controllers: dict[int, PTZController] = {}
@@ -223,9 +231,7 @@ class MainWindow(QMainWindow):
 
     def _migrate_if_needed(self):
         if self._cfg.migrate_from_env():
-            self.status_bar.showMessage(
-                "Migrated old config to new format", 4000
-            )
+            self.status_bar.showMessage("Migrated old config to new format", 4000)
             self._refresh_camera_list()
 
     def _refresh_camera_list(self):
@@ -330,14 +336,26 @@ class MainWindow(QMainWindow):
                     data = b""
                 if data:
                     text = data.decode("utf-8", errors="replace").strip()
-                    if text and self._is_mpv_connection_error(text):
+                    if not text:
+                        continue
+                    if self._is_mpv_connection_error(text):
                         self._stop_camera(cid)
                         camera = self._cfg.get_camera(cid)
-                        name = camera.get("name", f"Camera {cid}") if camera else (f"Camera {cid}")
-                        short = text.replace("\n", " ")[:120]
-                        self.status_bar.showMessage(
-                            f"Stream error: {name} — {short}", 6000
+                        name = (
+                            camera.get("name", f"Camera {cid}")
+                            if camera
+                            else (f"Camera {cid}")
                         )
+                        if is_auth_error(text):
+                            self.status_bar.showMessage(
+                                f"Auth failed: {name} — check username/password",
+                                6000,
+                            )
+                        else:
+                            short = text.replace("\n", " ")[:120]
+                            self.status_bar.showMessage(
+                                f"Stream error: {name} — {short}", 6000
+                            )
                         continue
 
             rc = proc.poll()
@@ -357,21 +375,7 @@ class MainWindow(QMainWindow):
     @staticmethod
     def _is_mpv_connection_error(text: str) -> bool:
         """Return True if *text* from mpv stderr indicates a connection failure."""
-        lower = text.lower()
-        triggers = (
-            "failed to connect",
-            "connection refused",
-            "connection timed out",
-            "error while opening",
-            "cannot open",
-            "no route to host",
-            "host unreachable",
-            "network is unreachable",
-            "name or service not known",
-            "resolve failed",
-            "connection reset",
-        )
-        return any(t in lower for t in triggers)
+        return is_mpv_connection_error(text)
 
     # ------------------------------------------------------------------
     # Stream control (subprocess mpv)
@@ -401,27 +405,9 @@ class MainWindow(QMainWindow):
         quality_idx = self._quality_combo.currentIndex()
         stream = "stream1" if quality_idx == 0 else "stream2"
 
-        encoded_user = urllib.parse.quote(username, safe="")
-        encoded_pass = urllib.parse.quote(password, safe="")
-        rtsp_url = f"rtsp://{encoded_user}:{encoded_pass}@{ip}/{stream}"
-
+        rtsp_url = build_rtsp_url(username, password, ip, stream)
         title = camera.get("name", f"Camera {camera_id}")
-
-        mpv_opts = [
-            "mpv",
-            f"--title=tapitoCAM — {title}",
-            "--profile=fast",
-            "--untimed",
-            "--cache=no",
-            "--demuxer-readahead-secs=0",
-            "--vd-lavc-threads=1",
-            "--rtsp-transport=udp",
-            "--demuxer-lavf-o-add=fflags=+nobuffer",
-            "--demuxer-lavf-o-add=probesize=5000000",
-            "--demuxer-lavf-o-add=analyzeduration=5000000",
-            "--video-sync=audio",
-            rtsp_url,
-        ]
+        mpv_opts = get_mpv_command(title, rtsp_url)
 
         try:
             proc = subprocess.Popen(
@@ -430,14 +416,15 @@ class MainWindow(QMainWindow):
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
             )
-            os.set_blocking(proc.stderr.fileno(), False)
+            if proc.stderr:
+                os.set_blocking(proc.stderr.fileno(), False)
             self._processes[camera_id] = proc
             self.status_bar.showMessage(f"Started: {title}", 3000)
         except FileNotFoundError:
             QMessageBox.critical(
-                self, "mpv Not Found",
-                "mpv is not installed. Install it with:\n"
-                "  sudo apt install mpv"
+                self,
+                "mpv Not Found",
+                "mpv is not installed. Install it with:\n  sudo apt install mpv",
             )
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to start mpv:\n{e}")
@@ -460,7 +447,11 @@ class MainWindow(QMainWindow):
                 pass
 
         camera = self._cfg.get_camera(camera_id)
-        name = camera.get("name", f"Camera {camera_id}") if camera else f"Camera {camera_id}"
+        name = (
+            camera.get("name", f"Camera {camera_id}")
+            if camera
+            else f"Camera {camera_id}"
+        )
         self.status_bar.showMessage(f"Stopped: {name}", 3000)
         self._sync_ui()
 
@@ -487,8 +478,8 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _connect_ptz(self, camera_id: int):
-        """Blocking ONVIF connect for a camera.  Called from main thread."""
-        # Don't re-connect if already cached
+        """Async ONVIF connect for a camera. Non-blocking."""
+        # Don't re-connect if already cached and connected
         if camera_id in self._ptz_controllers:
             ctrl = self._ptz_controllers[camera_id]
             if ctrl.is_connected:
@@ -499,6 +490,7 @@ class MainWindow(QMainWindow):
         camera = self._cfg.get_camera(camera_id)
         if not camera:
             return
+        name = camera.get("name", f"Camera {camera_id}")
         ip = camera.get("ip", "")
         user = camera.get("username", "")
         password = camera.get("password", "")
@@ -506,19 +498,35 @@ class MainWindow(QMainWindow):
             return
 
         self.status_bar.showMessage("Connecting PTZ...", 2000)
-        ctrl = PTZController()
-        ok = ctrl.connect(ip, user, password)
-        self._ptz_controllers[camera_id] = ctrl
-        if ok:
-            self._set_ptz_enabled(camera_id in self._processes)
-            self.status_bar.showMessage("PTZ ready", 3000)
-        else:
-            self._set_ptz_enabled(False)
-            self.status_bar.showMessage("PTZ connection failed", 3000)
+
+        # Create new controller if not exists
+        if camera_id not in self._ptz_controllers:
+            self._ptz_controllers[camera_id] = PTZController()
+
+        ctrl = self._ptz_controllers[camera_id]
+
+        def on_connected(success: bool, error: str):
+            if success:
+                self._set_ptz_enabled(camera_id in self._processes)
+                self.status_bar.showMessage("PTZ ready", 3000)
+            else:
+                self._set_ptz_enabled(False)
+                if is_auth_error(error):
+                    msg = f"PTZ auth failed: {name} — check camera credentials"
+                else:
+                    msg = f"PTZ connection failed: {error}"
+                self.status_bar.showMessage(msg, 3000)
+
+        ctrl.connect_async(ip, user, password, on_connected)
 
     def _set_ptz_enabled(self, enabled: bool):
-        for btn in (self._ptz_up, self._ptz_down, self._ptz_left,
-                    self._ptz_right, self._ptz_stop_btn):
+        for btn in (
+            self._ptz_up,
+            self._ptz_down,
+            self._ptz_left,
+            self._ptz_right,
+            self._ptz_stop_btn,
+        ):
             btn.setEnabled(enabled)
 
     def _ptz_move(self, pan: float, tilt: float):
@@ -566,78 +574,42 @@ class MainWindow(QMainWindow):
 
 
 # ===========================================================================
+# Cleanup — kill orphaned mpv processes on crash
+# ===========================================================================
+
+_process_registry: dict[int, subprocess.Popen] = {}
+
+
+def _kill_all_processes():
+    """Kill all tracked mpv processes. Registered as atexit + signal handler."""
+    for cid, proc in list(_process_registry.items()):
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            proc.wait(timeout=2)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+    _process_registry.clear()
+
+
+atexit.register(_kill_all_processes)
+signal.signal(signal.SIGTERM, lambda *_: _kill_all_processes())
+signal.signal(signal.SIGINT, lambda *_: _kill_all_processes())
+
+
+# ===========================================================================
 # App entry point
 # ===========================================================================
+
 
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName("tapitoCAM")
     app.setStyle("Fusion")
 
-    app.setStyleSheet("""
-        QMainWindow, QWidget#central_widget {
-            background: #1e1e1e;
-            color: #e0e0e0;
-        }
-        QPushButton {
-            border: 1px solid #3a3a3a;
-            border-radius: 6px;
-            padding: 8px 16px;
-            background: #2d2d2d;
-            color: #e0e0e0;
-            font-weight: 500;
-        }
-        QPushButton:hover {
-            background: #383838;
-            border-color: #3b82f6;
-        }
-        QPushButton:pressed {
-            background: #3b82f6;
-            color: #ffffff;
-        }
-        QPushButton:disabled {
-            background: #1a1a1a;
-            color: #666666;
-            border-color: #2a2a2a;
-        }
-        QComboBox {
-            border: 1px solid #3a3a3a;
-            border-radius: 6px;
-            padding: 8px 12px;
-            background: #252525;
-            color: #e0e0e0;
-        }
-        QComboBox:focus {
-            border-color: #3b82f6;
-        }
-        QComboBox::drop-down {
-            border: none;
-            width: 28px;
-        }
-        QComboBox::down-arrow {
-            image: none;
-            border-left: 5px solid transparent;
-            border-right: 5px solid transparent;
-            border-top: 6px solid #888888;
-            margin-right: 8px;
-        }
-        QComboBox QAbstractItemView {
-            background: #252525;
-            color: #e0e0e0;
-            selection-background-color: #3b82f6;
-            border: 1px solid #3a3a3a;
-            outline: none;
-        }
-        QLabel {
-            color: #e0e0e0;
-        }
-        QStatusBar {
-            background: #1a1a1a;
-            color: #888888;
-            border-top: 1px solid #333333;
-            padding: 4px;
-        }
-    """)
+    app.setStyleSheet(DARK_THEME)
 
     window = MainWindow()
     window.show()

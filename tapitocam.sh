@@ -3,18 +3,19 @@
 
 set -o pipefail
 
-VERSION="1.1.0"
+VERSION="1.2.0"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_DIR="${HOME}/.config/tapitocam"
-CONFIG_FILE="${CONFIG_DIR}/.tapitocam.env"
+ENV_FILE="${CONFIG_DIR}/.tapitocam.env"
+PYTHON_HELPER="${SCRIPT_DIR}/tapitocam_cli.py"
 
 # ---------------------------------------------------------------------------
 # Dependencies
 # ---------------------------------------------------------------------------
 check_deps() {
     local missing=0 cmd
-    for cmd in mpv mktemp; do
+    for cmd in mpv mktemp python3; do
         if ! command -v "$cmd" &>/dev/null; then
             echo "Error: '$cmd' is not installed."
             missing=1
@@ -24,10 +25,22 @@ check_deps() {
 }
 
 # ---------------------------------------------------------------------------
-# Config I/O
+# Config I/O — uses Python helper for JSON, falls back to .env
 # ---------------------------------------------------------------------------
 load_config() {
-    [[ -f "$CONFIG_FILE" ]] || return 1
+    local cam_index="${1:-0}"
+
+    # Try JSON via Python helper first
+    if [[ -f "$PYTHON_HELPER" ]]; then
+        local output
+        output=$(python3 "$PYTHON_HELPER" --camera "$cam_index" 2>/dev/null) && {
+            eval "$output"
+            return 0
+        }
+    fi
+
+    # Fallback: legacy .env
+    [[ -f "$ENV_FILE" ]] || return 1
     local line
     while IFS= read -r line; do
         [[ "$line" =~ ^#         ]] && continue
@@ -35,18 +48,8 @@ load_config() {
         [[ "$line" =~ ^TAPO_USER=(.*)$ ]] && TAPO_USER="${BASH_REMATCH[1]}"
         [[ "$line" =~ ^TAPO_PASS=(.*)$ ]] && TAPO_PASS=$(printf '%s' "${BASH_REMATCH[1]}" | base64 -d 2>/dev/null || printf '%s' "${BASH_REMATCH[1]}")
         [[ "$line" =~ ^TAPO_IP=(.*)$   ]] && TAPO_IP="${BASH_REMATCH[1]}"
-    done < "$CONFIG_FILE"
-}
-
-save_config() {
-    mkdir -p "$CONFIG_DIR"
-    {
-        echo "# tapitoCAM configuration"
-        echo "TAPO_USER=$TAPO_USER"
-        echo "TAPO_PASS=$(printf '%s' "$TAPO_PASS" | base64 -w0)"
-        echo "TAPO_IP=$TAPO_IP"
-    } > "$CONFIG_FILE"
-    chmod 600 "$CONFIG_FILE"
+        [[ "$line" =~ ^TAPO_QUALITY=(.*)$ ]] && TAPO_QUALITY="${BASH_REMATCH[1]}"
+    done < "$ENV_FILE"
 }
 
 # ---------------------------------------------------------------------------
@@ -74,10 +77,11 @@ validate_ip() {
 }
 
 # ---------------------------------------------------------------------------
-# Interactive setup
+# Interactive setup (saves to JSON via Python helper)
 # ---------------------------------------------------------------------------
 setup_config() {
     echo "--- tapitoCAM Configuration ---"
+    read -r -p "Enter Camera Name (e.g., Front Door): " TAPO_NAME
     read -r -p "Enter Tapo Username: " TAPO_USER
     read -r -s -p "Enter Tapo Password: " TAPO_PASS
     echo
@@ -85,12 +89,54 @@ setup_config() {
     if ! validate_ip "$TAPO_IP"; then
         echo "Warning: The entered IP address appears invalid."
     fi
+    read -r -p "Quality (hd/sd) [hd]: " TAPO_QUALITY
+    TAPO_QUALITY="${TAPO_QUALITY:-hd}"
 
-    read -r -p "Save these settings to .tapitocam.env? (y/n): " ans
+    read -r -p "Save this camera? (y/n): " ans
     if [[ "$ans" =~ ^[Yy]$ ]]; then
-        save_config
-        echo "Settings saved."
+        # Write via Python helper (or directly if Python not available)
+        if [[ -f "$PYTHON_HELPER" ]]; then
+            python3 -c "
+import json, sys
+from pathlib import Path
+p = Path.home() / '.config' / 'tapitocam' / 'cameras.json'
+p.parent.mkdir(parents=True, exist_ok=True)
+try:
+    with open(p) as f:
+        data = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    data = {'version': 1, 'cameras': []}
+cameras = data.get('cameras', [])
+new_id = max((c['id'] for c in cameras), default=-1) + 1
+cameras.append({
+    'id': new_id,
+    'name': '${TAPO_NAME:-Camera $new_id}',
+    'username': '$TAPO_USER',
+    'password': '$TAPO_PASS',
+    'ip': '$TAPO_IP',
+    'quality': '$TAPO_QUALITY',
+})
+data['cameras'] = cameras
+with open(p, 'w') as f:
+    json.dump(data, f, indent=2)
+print(f'Camera saved (id={new_id})')
+" 2>/dev/null && echo "Settings saved." || {
+            # Fallback to legacy .env
+            save_env_config
+        }
     fi
+}
+
+save_env_config() {
+    mkdir -p "$CONFIG_DIR"
+    {
+        echo "# tapitoCAM configuration"
+        echo "TAPO_USER=$TAPO_USER"
+        echo "TAPO_PASS=$(printf '%s' "$TAPO_PASS" | base64 -w0)"
+        echo "TAPO_IP=$TAPO_IP"
+        echo "TAPO_QUALITY=${TAPO_QUALITY:-hd}"
+    } > "$ENV_FILE"
+    chmod 600 "$ENV_FILE"
 }
 
 # ---------------------------------------------------------------------------
@@ -98,17 +144,20 @@ setup_config() {
 # ---------------------------------------------------------------------------
 is_network_error() {
     local log="$1"
-    grep -Eiq "No route to host|Connection timed out|Connection refused|Failed to resolve hostname" "$log"
+    grep -Eiq "No route to host|Connection timed out|Connection refused|Failed to resolve|Failed to connect|Connection reset|Network is unreachable" "$log"
 }
 
 show_network_error() {
     local log="$1"
-    grep -Ei "No route to host|Connection timed out|Connection refused|Failed to resolve hostname" "$log" | head -1
+    grep -Ei "No route to host|Connection timed out|Connection refused|Failed to resolve|Failed to connect|Connection reset|Network is unreachable" "$log" | head -1
 }
 
 run_stream() {
+    local quality="${1:-stream1}"
+    [[ "$quality" == "sd" ]] && quality="stream2"
+
     local rtsp_url
-    rtsp_url="rtsp://$(urlencode "$TAPO_USER"):$(urlencode "$TAPO_PASS")@${TAPO_IP}/stream1"
+    rtsp_url="rtsp://$(urlencode "$TAPO_USER"):$(urlencode "$TAPO_PASS")@${TAPO_IP}/${quality}"
 
     local url_file
     url_file=$(mktemp) || exit 1
@@ -149,6 +198,17 @@ run_stream() {
     return $exit_code
 }
 
+list_cameras() {
+    if [[ -f "$PYTHON_HELPER" ]]; then
+        python3 "$PYTHON_HELPER" --list 2>/dev/null | grep -E "^TAPO_CAM_" | while read -r line; do
+            echo "$line"
+        done
+        return 0
+    fi
+    # Fallback
+    echo "Single camera (legacy .env)"
+}
+
 # ---------------------------------------------------------------------------
 # Usage
 # ---------------------------------------------------------------------------
@@ -159,9 +219,12 @@ Usage: $(basename "$0") [OPTIONS]
 Stream your TP-Link Tapo camera over RTSP using mpv.
 
 Options:
-  -h, --help       Show this help message
-  -r, --reset      Reset saved configuration
-  -i, --ip IP      Set camera IP address (overrides saved config)
+  -h, --help          Show this help message
+  -r, --reset         Reset saved configuration
+  -i, --ip IP         Set camera IP address (overrides saved config)
+  -c, --camera ID     Select camera by ID (default: 0)
+  -q, --quality HD|SD Select stream quality (default: HD)
+  -l, --list          List configured cameras
 EOF
     exit 0
 }
@@ -171,36 +234,53 @@ EOF
 # ---------------------------------------------------------------------------
 main() {
     local reset_config=0
+    local camera_id=0
+    local quality="hd"
 
     check_deps || exit 1
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            -h|--help)  usage ;;
-            -r|--reset) reset_config=1; shift ;;
-            -i|--ip)    TAPO_IP="$2"; shift 2 ;;
-            *)          echo "Unknown option: $1"; usage ;;
+            -h|--help)      usage ;;
+            -r|--reset)     reset_config=1; shift ;;
+            -i|--ip)        TAPO_IP="$2"; shift 2 ;;
+            -c|--camera)    camera_id="$2"; shift 2 ;;
+            -q|--quality)   quality="$2"; shift 2 ;;
+            -l|--list)      list_cameras; exit 0 ;;
+            *)              echo "Unknown option: $1"; usage ;;
         esac
     done
 
     if [[ $reset_config -eq 1 ]]; then
-        rm -f "$CONFIG_FILE"
-        echo "Configuration reset."
+        rm -f "$ENV_FILE"
+        if [[ -f "$PYTHON_HELPER" ]]; then
+            python3 -c "
+import json
+from pathlib import Path
+p = Path.home() / '.config' / 'tapitocam' / 'cameras.json'
+if p.exists():
+    p.unlink()
+    print('Configuration reset.')
+" 2>/dev/null || echo "Configuration reset."
+        fi
     fi
 
-    load_config
+    # If IP was provided as flag, use it directly
+    if [[ -z "${TAPO_IP:-}" ]]; then
+        load_config "$camera_id"
+    fi
 
-    if [[ -z "$TAPO_USER" || -z "$TAPO_PASS" || -z "$TAPO_IP" ]]; then
+    if [[ -z "${TAPO_USER:-}" || -z "${TAPO_PASS:-}" || -z "${TAPO_IP:-}" ]]; then
         setup_config
     fi
 
-    if [[ -z "$TAPO_USER" || -z "$TAPO_PASS" || -z "$TAPO_IP" ]]; then
+    if [[ -z "${TAPO_USER:-}" || -z "${TAPO_PASS:-}" || -z "${TAPO_IP:-}" ]]; then
         echo "Error: Missing credentials."
         exit 1
     fi
 
     while true; do
-        run_stream
+        run_stream "$quality"
         local rc=$?
 
         # Ctrl+C → exit cleanly
@@ -212,7 +292,7 @@ main() {
         read -r -p "Would you like to enter a different IP? (y/n): " ans
         if [[ "$ans" =~ ^[Yy]$ ]]; then
             read -r -p "Enter new Camera IP: " TAPO_IP
-            save_config
+            save_env_config
             echo "IP updated to $TAPO_IP. Retrying..."
             continue
         fi

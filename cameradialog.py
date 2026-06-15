@@ -17,11 +17,13 @@ from PySide6.QtWidgets import (
 )
 
 from cameraconfig import ConfigManager
+from styles import DARK_THEME
 
 
 # ===========================================================================
 # Camera edit sub-dialog
 # ===========================================================================
+
 
 class _CameraEditDialog(QDialog):
     """Modal dialog for adding or editing a single camera."""
@@ -72,8 +74,7 @@ class _CameraEditDialog(QDialog):
         layout.addStretch()
 
         buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok
-            | QDialogButtonBox.StandardButton.Cancel
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
         buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)
@@ -124,77 +125,13 @@ class _CameraEditDialog(QDialog):
         return self._result
 
     def _apply_stylesheet(self):
-        self.setStyleSheet("""
-            QDialog {
-                background: #1e1e1e;
-                color: #e0e0e0;
-            }
-            QLabel {
-                color: #e0e0e0;
-            }
-            QLineEdit {
-                border: 1px solid #3a3a3a;
-                border-radius: 6px;
-                padding: 8px 12px;
-                background: #252525;
-                color: #e0e0e0;
-                selection-background-color: #3b82f6;
-            }
-            QLineEdit:focus {
-                border-color: #3b82f6;
-                background: #2a2a2a;
-            }
-            QLineEdit::placeholder {
-                color: #777777;
-            }
-            QComboBox {
-                border: 1px solid #3a3a3a;
-                border-radius: 6px;
-                padding: 8px 12px;
-                background: #252525;
-                color: #e0e0e0;
-            }
-            QComboBox:focus {
-                border-color: #3b82f6;
-            }
-            QComboBox::drop-down {
-                border: none;
-                width: 28px;
-            }
-            QComboBox::down-arrow {
-                image: none;
-                border-left: 5px solid transparent;
-                border-right: 5px solid transparent;
-                border-top: 6px solid #888888;
-                margin-right: 8px;
-            }
-            QComboBox QAbstractItemView {
-                background: #252525;
-                color: #e0e0e0;
-                selection-background-color: #3b82f6;
-                border: 1px solid #3a3a3a;
-            }
-            QPushButton {
-                border: 1px solid #3a3a3a;
-                border-radius: 6px;
-                padding: 8px 16px;
-                background: #2d2d2d;
-                color: #e0e0e0;
-            }
-            QPushButton:hover {
-                background: #383838;
-                border-color: #3b82f6;
-            }
-            QPushButton:pressed {
-                background: #3b82f6;
-                color: #ffffff;
-            }
-        """)
+        self.setStyleSheet(DARK_THEME)
 
 
 # ===========================================================================
 # Camera Manager Dialog  (main)
 # ===========================================================================
+
 
 class CameraManagerDialog(QDialog):
     """Main dialog for managing the camera list.
@@ -307,8 +244,9 @@ class CameraManagerDialog(QDialog):
         camera = self._cfg.get_camera(cam_id)
         name = camera.get("name", f"Camera {cam_id}") if camera else f"Camera {cam_id}"
         reply = QMessageBox.question(
-            self, "Remove Camera",
-            f"Remove \"{name}\"?",
+            self,
+            "Remove Camera",
+            f'Remove "{name}"?',
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
@@ -323,52 +261,4 @@ class CameraManagerDialog(QDialog):
         return self._cameras
 
     def _apply_stylesheet(self):
-        self.setStyleSheet("""
-            QDialog {
-                background: #1e1e1e;
-                color: #e0e0e0;
-            }
-            QListWidget {
-                background: #1a1a1a;
-                color: #e0e0e0;
-                border: 1px solid #333333;
-                border-radius: 6px;
-                padding: 4px;
-                outline: none;
-            }
-            QListWidget::item {
-                padding: 8px 12px;
-                border-radius: 4px;
-            }
-            QListWidget::item:selected {
-                background: #3b82f6;
-                color: #ffffff;
-            }
-            QListWidget::item:hover:!selected {
-                background: #2a2a2a;
-            }
-            QPushButton {
-                border: 1px solid #3a3a3a;
-                border-radius: 6px;
-                padding: 8px 16px;
-                background: #2d2d2d;
-                color: #e0e0e0;
-                min-width: 80px;
-            }
-            QPushButton:hover {
-                background: #383838;
-                border-color: #3b82f6;
-            }
-            QPushButton:pressed {
-                background: #3b82f6;
-                color: #ffffff;
-            }
-            QPushButton:disabled {
-                background: #1a1a1a;
-                color: #666666;
-                border-color: #2a2a2a;
-            }
-            QLabel {
-                color: #e0e0e0;
-            }
-        """)
+        self.setStyleSheet(DARK_THEME)

@@ -2,8 +2,6 @@
 """Unit tests for the cameraconfig module."""
 
 import base64
-import json
-import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -34,8 +32,14 @@ class TestConfigManager(unittest.TestCase):
     def test_save_and_load_roundtrip(self):
         """Save then load returns identical data."""
         expected = [
-            {"id": 0, "name": "Cam A", "username": "u1", "password": "p1",
-             "ip": "10.0.0.1", "quality": "hd"},
+            {
+                "id": 0,
+                "name": "Cam A",
+                "username": "u1",
+                "password": "p1",
+                "ip": "10.0.0.1",
+                "quality": "hd",
+            },
         ]
         self.cfg.save(expected)
         result = self.cfg.load()
@@ -54,9 +58,7 @@ class TestConfigManager(unittest.TestCase):
 
     def test_add_camera_assigns_ids(self):
         """add_camera assigns sequential ids starting from 0."""
-        id0 = self.cfg.add_camera(
-            {"username": "u", "password": "p", "ip": "10.0.0.1"}
-        )
+        id0 = self.cfg.add_camera({"username": "u", "password": "p", "ip": "10.0.0.1"})
         self.assertEqual(id0, 0)
 
         id1 = self.cfg.add_camera(
@@ -66,34 +68,27 @@ class TestConfigManager(unittest.TestCase):
 
     def test_add_camera_defaults_name(self):
         """Blank name defaults to 'Camera {id}'."""
-        cid = self.cfg.add_camera(
-            {"username": "u", "password": "p", "ip": "10.0.0.1"}
-        )
+        cid = self.cfg.add_camera({"username": "u", "password": "p", "ip": "10.0.0.1"})
         cam = self.cfg.get_camera(cid)
         self.assertEqual(cam["name"], f"Camera {cid}")
 
     def test_add_camera_default_quality(self):
         """Default quality is 'hd'."""
-        cid = self.cfg.add_camera(
-            {"username": "u", "password": "p", "ip": "10.0.0.1"}
-        )
+        cid = self.cfg.add_camera({"username": "u", "password": "p", "ip": "10.0.0.1"})
         cam = self.cfg.get_camera(cid)
         self.assertEqual(cam["quality"], "hd")
 
     def test_add_with_explicit_name(self):
         """Explicit name is preserved."""
         cid = self.cfg.add_camera(
-            {"username": "u", "password": "p", "ip": "10.0.0.1",
-             "name": "Front Door"}
+            {"username": "u", "password": "p", "ip": "10.0.0.1", "name": "Front Door"}
         )
         cam = self.cfg.get_camera(cid)
         self.assertEqual(cam["name"], "Front Door")
 
     def test_update_camera(self):
         """update_camera modifies fields and preserves id."""
-        cid = self.cfg.add_camera(
-            {"username": "u", "password": "p", "ip": "10.0.0.1"}
-        )
+        cid = self.cfg.add_camera({"username": "u", "password": "p", "ip": "10.0.0.1"})
         ok = self.cfg.update_camera(cid, {"name": "Updated", "ip": "10.0.0.99"})
         self.assertTrue(ok)
         cam = self.cfg.get_camera(cid)
@@ -199,9 +194,7 @@ class TestConfigManager(unittest.TestCase):
         """migrate_from_env reads the old env and creates a camera entry."""
         env_file = self.config_dir / ".tapitocam.env"
         env_file.write_text(
-            "TAPO_USER=admin\n"
-            "TAPO_PASS={}\n"
-            "TAPO_IP=192.168.1.100\n".format(
+            "TAPO_USER=admin\nTAPO_PASS={}\nTAPO_IP=192.168.1.100\n".format(
                 base64.b64encode(b"secret").decode()
             )
         )
