@@ -663,6 +663,8 @@ class MainWindow(QMainWindow):
             else:
                 self._set_pantilt_enabled(False)
                 self._set_zoom_enabled(False)
+                self._preset_combo.clear()
+                self._preset_combo.addItem("— no presets —")
                 if is_auth_error(error):
                     msg = f"PTZ auth failed: {name} — check camera credentials"
                 else:
