@@ -273,14 +273,6 @@ class MainWindow(QMainWindow):
         self._preset_combo.setEnabled(False)
         self._preset_combo.addItem("— no presets —")
         preset_row.addWidget(self._preset_combo)
-        self._preset_save_btn = QPushButton()
-        self._preset_save_btn.setIcon(
-            self.style().standardIcon(QStyle.StandardPixmap.SP_DialogSaveButton)
-        )
-        self._preset_save_btn.setFixedSize(38, 32)
-        self._preset_save_btn.setEnabled(False)
-        self._preset_save_btn.clicked.connect(self._ptz_preset_save)
-        preset_row.addWidget(self._preset_save_btn)
         self._preset_go_btn = QPushButton()
         self._preset_go_btn.setIcon(
             self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay)
@@ -289,6 +281,14 @@ class MainWindow(QMainWindow):
         self._preset_go_btn.setEnabled(False)
         self._preset_go_btn.clicked.connect(self._ptz_preset_go)
         preset_row.addWidget(self._preset_go_btn)
+        self._preset_save_btn = QPushButton()
+        self._preset_save_btn.setIcon(
+            self.style().standardIcon(QStyle.StandardPixmap.SP_DialogSaveButton)
+        )
+        self._preset_save_btn.setFixedSize(38, 32)
+        self._preset_save_btn.setEnabled(False)
+        self._preset_save_btn.clicked.connect(self._ptz_preset_save)
+        preset_row.addWidget(self._preset_save_btn)
         self._preset_del_btn = QPushButton()
         self._preset_del_btn.setIcon(
             self.style().standardIcon(QStyle.StandardPixmap.SP_TrashIcon)
