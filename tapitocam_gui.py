@@ -722,7 +722,7 @@ class MainWindow(QMainWindow):
         ctrl.connect_async(ip, user, password, on_connected)
 
     def _set_pantilt_enabled(self, enabled: bool):
-        """Enable/disable pan, tilt, stop, and preset buttons."""
+        """Enable/disable pan, tilt, stop, and preset action buttons."""
         for btn in (
             self._ptz_up,
             self._ptz_down,
@@ -732,7 +732,6 @@ class MainWindow(QMainWindow):
         ):
             btn.setEnabled(enabled)
         self._preset_save_btn.setEnabled(enabled)
-        self._preset_combo.setEnabled(enabled)
         self._preset_go_btn.setEnabled(
             enabled and self._preset_combo.currentData() is not None
         )
@@ -802,6 +801,7 @@ class MainWindow(QMainWindow):
         else:
             self._preset_combo.addItem("— no presets —")
         self._preset_combo.blockSignals(False)
+        self._preset_combo.setEnabled(True)
         self._preset_go_btn.setEnabled(
             self._preset_combo.currentData() is not None
         )
