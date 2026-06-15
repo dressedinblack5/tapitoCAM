@@ -561,7 +561,15 @@ class MainWindow(QMainWindow):
             )
         except Exception as e:
             os.unlink(playlist_path)
-            QMessageBox.critical(self, "Error", f"Failed to start mpv:\n{e}")
+            err = str(e)
+            if is_mpv_connection_error(err):
+                self.status_bar.showMessage(
+                    f"Stream error: {title} — {err}", 6000
+                )
+            else:
+                self.status_bar.showMessage(
+                    f"Stream failed: {err[:120]}", 5000
+                )
 
         self._sync_ui()
 
