@@ -13,6 +13,7 @@ TP-Link Tapo Camera RTSP Client for Linux — multi-camera control center.
 - **HD / SD quality** — select stream1 (HD) or stream2 (SD) per camera
 - **Camera Manager** — dedicated dialog for managing camera list, credentials, and IPs
 - **CLI** — multi-camera RTSP viewer with quality selection
+- **Secure credential handling** — OS keyring support, credential-free process listing
 
 ## Prerequisites
 
@@ -21,6 +22,10 @@ TP-Link Tapo Camera RTSP Client for Linux — multi-camera control center.
 - **Python 3.10+** with PySide6 and onvif-zeep (for GUI):
   ```bash
   pip install pyside6 onvif-zeep
+  ```
+- **keyring** (optional) — for secure password storage in the OS keychain:
+  ```bash
+  pip install keyring
   ```
 
 You also need to create a dedicated **Camera Account** in the Tapo app for RTSP access:
@@ -67,7 +72,9 @@ open the Camera Manager dialog and add your first camera.
 - **✏ Edit** — modify an existing camera's settings
 - **✕ Remove** — delete a camera
 - IP addresses are validated on save (each octet 0–255)
-- Passwords are base64-encoded in `~/.config/tapitocam/cameras.json`
+- Passwords are stored in the OS keyring when available (GNOME Keyring,
+  KDE Wallet, macOS Keychain); a base64-encoded fallback copy is kept in
+  `~/.config/tapitocam/cameras.json` with `0o600` permissions
 
 ### Streaming
 
@@ -76,6 +83,8 @@ open the Camera Manager dialog and add your first camera.
 - Use **■ Stop Stream** to close it, or **Start All / Stop All** for batch control
 - If mpv cannot connect (wrong IP, unreachable host), the GUI shows the
   connection error on the status bar and kills the stuck process within 2 seconds
+- The RTSP URL (containing credentials) is never exposed on the command line;
+  it is written to a private temp file and passed to mpv via `--playlist`
 
 ### PTZ
 
@@ -114,6 +123,24 @@ rm -f ~/.local/bin/tapitocam ~/.local/bin/tapitocam-gui \
       ~/.local/share/applications/tapitoCAM.desktop
 rm -rf ~/.config/tapitocam
 ```
+
+## Security
+
+tapitoCAM handles camera credentials and takes the following measures:
+
+| Measure | What it does |
+|---------|-------------|
+| **Keyring storage** | Passwords are stored in the OS keyring (GNOME Keyring, KDE Wallet, macOS Keychain) when available. The config file keeps a base64-encoded fallback copy with `0o600` permissions.  Install `keyring` (`pip install keyring`) to enable this. |
+| **Playlist approach** | The RTSP URL (containing username:password) is written to a private temp file (`0o600`) and passed to mpv via `--playlist=<file>`. Credentials never appear in `ps aux` or `/proc/<pid>/cmdline`.  Temp files are cleaned up on stream stop, app close, and crash. |
+| **Error sanitization** | ONVIF connection error messages are sanitized before display — credential-like patterns (`user:pass@host`, `password=XXX`) are stripped from status bar messages. |
+| **Config file** | `~/.config/tapitocam/cameras.json` is created with `0o600` permissions (owner read/write only). |
+| **Subprocess safety** | mpv is spawned via `subprocess.Popen` with a list argv (no `shell=True`), preventing command injection. |
+
+**Known limitations:**
+
+- ONVIF connections use HTTP (no TLS) — credentials are sent in cleartext over the LAN. Use on a trusted network only.
+- The CLI (`tapitocam.sh`) writes the RTSP URL to a temp file for mpv's `--playlist` flag. This file is created with `0o600` and deleted after use, but the password briefly touches disk.
+- If the `keyring` library is not installed, passwords in the config file are only base64-encoded (not encrypted).
 
 ## Notes
 
