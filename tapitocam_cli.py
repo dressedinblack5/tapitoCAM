@@ -4,8 +4,9 @@
 import sys
 from pathlib import Path
 
-CONFIG_DIR = Path.home() / ".config" / "tapitocam"
-OLD_ENV_FILE = CONFIG_DIR / ".tapitocam.env"
+from cameraconfig import CONFIG_DIR_DEFAULT as CONFIG_DIR
+
+OLD_ENV_FILE = Path(CONFIG_DIR) / ".tapitocam.env"
 
 
 def load_json_config() -> list[dict]:

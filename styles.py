@@ -104,11 +104,3 @@ QDialog {
 }
 """
 
-# Widget-specific overrides (merged with DARK_THEME where needed)
-INFO_PANEL_STYLE = """
-QWidget#info_panel {
-    background: #1a1a1a;
-    border: 1px solid #333333;
-    border-radius: 8px;
-}
-"""
