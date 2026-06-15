@@ -82,8 +82,8 @@ class MainWindow(QMainWindow):
 
     def _init_ui(self):
         self.setWindowTitle("tapitoCAM")
-        self.setMinimumSize(420, 480)
-        self.resize(480, 540)
+        self.setMinimumSize(440, 540)
+        self.resize(480, 580)
 
         central = QWidget()
         central.setObjectName("central_widget")
