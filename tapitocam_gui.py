@@ -325,6 +325,14 @@ class MainWindow(QMainWindow):
         self._start_all_btn.setEnabled(has_any and not all_streaming)
         self._stop_all_btn.setEnabled(any_streaming)
 
+        # Sync PTZ enabled state — this runs on a 2s timer so it catches
+        # the case where streaming started *after* the async PTZ callback fired.
+        cam_id = self._current_camera_id
+        if cam_id is not None:
+            ctrl = self._ptz_controllers.get(cam_id)
+            if ctrl is not None and ctrl.is_connected:
+                self._set_ptz_enabled(cam_id in self._processes)
+
     def _prune_dead_processes(self):
         """Remove mpv processes that have exited or report connection errors."""
         dead = []
