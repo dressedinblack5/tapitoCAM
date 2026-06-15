@@ -184,7 +184,12 @@ class PTZController:
             request.ProfileToken = self.profile_token
             request.PresetName = name
             result = self.ptz.SetPreset(request)
-            return result.PresetToken if hasattr(result, "PresetToken") else None
+            if hasattr(result, "PresetToken"):
+                return result.PresetToken
+            # Some cameras return the preset token as a plain string
+            if isinstance(result, str):
+                return result
+            return str(result) if result else None
         except Exception as exc:
             print(
                 f"[PTZ] SetPreset failed: {exc}",
