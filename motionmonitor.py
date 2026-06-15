@@ -139,14 +139,13 @@ class MotionMonitor(QObject):
         result = evt.CreatePullPointSubscription()
 
         ref = result.SubscriptionReference
+        # The URL is nested: Address._value_1 (zeep AttributedURIType)
         addr = None
-        raw = getattr(ref, "_value_1", None)
-        if isinstance(raw, str):
-            addr = raw
-        elif hasattr(raw, "_value_1"):
-            addr = raw._value_1
-        elif isinstance(raw, dict):
-            addr = raw.get("_value_1")
+        addr_attr = getattr(ref, "Address", None)
+        if addr_attr is not None:
+            raw = getattr(addr_attr, "_value_1", None)
+            if isinstance(raw, str):
+                addr = raw
 
         if not addr:
             raise RuntimeError("Failed to extract subscription address")
