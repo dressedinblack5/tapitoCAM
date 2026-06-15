@@ -480,6 +480,9 @@ class MainWindow(QMainWindow):
                 is_streaming = cam_id in self._processes
                 self._set_pantilt_enabled(is_streaming)
                 self._set_zoom_enabled(is_streaming and ctrl.has_zoom)
+                # Refresh presets if combo is still empty
+                if self._preset_combo.count() == 1 and self._preset_combo.itemText(0) == "— no presets —":
+                    self._ptz_preset_refresh(cam_id)
 
     def _prune_dead_processes(self):
         """Remove mpv processes that have exited or report connection errors."""
