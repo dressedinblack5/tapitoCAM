@@ -75,6 +75,8 @@ class MainWindow(QMainWindow):
         # Motion detection
         self._motion_monitor = MotionMonitor(self)
         self._motion_monitor.motion_changed.connect(self._on_motion_changed)
+        self._motion_monitor.tamper_changed.connect(self._on_tamper_changed)
+        self._motion_monitor.intrusion_changed.connect(self._on_intrusion_changed)
         self._motion_monitor.error_occurred.connect(
             lambda msg: self.status_bar.showMessage(msg, 0)
         )
@@ -164,14 +166,24 @@ class MainWindow(QMainWindow):
         self._motion_count_label = QLabel("(0)")
         self._motion_count_label.setStyleSheet("color: #666666; padding: 2px 0; font-size: 12px;")
 
-        motion_row = QHBoxLayout()
-        motion_row.setSpacing(4)
-        motion_row.setContentsMargins(0, 0, 0, 0)
-        motion_row.addWidget(self._motion_label)
-        motion_row.addWidget(self._motion_count_label)
-        motion_row.addStretch()
+        self._tamper_label = QLabel("⚫")
+        self._tamper_label.setStyleSheet("color: #555555; padding: 2px 0;")
 
-        detail_grid.addRow("Motion:", motion_row)
+        self._intrusion_label = QLabel("⚫")
+        self._intrusion_label.setStyleSheet("color: #555555; padding: 2px 0;")
+
+        alerts_row = QGridLayout()
+        alerts_row.setSpacing(4)
+        alerts_row.setContentsMargins(0, 0, 0, 0)
+        alerts_row.addWidget(QLabel("Motion:"), 0, 0)
+        alerts_row.addWidget(self._motion_label, 0, 1)
+        alerts_row.addWidget(self._motion_count_label, 0, 2)
+        alerts_row.addWidget(QLabel("Tamper:"), 1, 0)
+        alerts_row.addWidget(self._tamper_label, 1, 1)
+        alerts_row.addWidget(QLabel("Intrusion:"), 2, 0)
+        alerts_row.addWidget(self._intrusion_label, 2, 1)
+
+        detail_grid.addRow("Alerts:", alerts_row)
         info_layout.addLayout(detail_grid)
 
         # Stream controls
@@ -402,10 +414,14 @@ class MainWindow(QMainWindow):
         self._motion_count = 0
         self._motion_count_label.setText("(0)")
         self._motion_label.setStyleSheet("color: #555555; padding: 2px 0;")
+        self._tamper_label.setText("⚫")
+        self._tamper_label.setStyleSheet("color: #555555; padding: 2px 0;")
+        self._intrusion_label.setText("⚫")
+        self._intrusion_label.setStyleSheet("color: #555555; padding: 2px 0;")
 
         # Reset preset selector until PTZ connects
         self._preset_combo.clear()
-        self._preset_combo.addItem("Loading presets...")
+        self._preset_combo.addItem("— no presets —")
         self._preset_combo.setEnabled(False)
         self._preset_save_btn.setEnabled(False)
         self._preset_go_btn.setEnabled(False)
@@ -836,11 +852,18 @@ class MainWindow(QMainWindow):
             self._motion_count += 1
         self._motion_label.setText("🔴" if is_motion else "⚫")
         self._motion_count_label.setText(f"({self._motion_count})")
-        self._motion_label.setStyleSheet(
-            "color: #ef4444; padding: 2px 0;"
-            if is_motion
-            else "color: #555555; padding: 2px 0;"
-        )
+        color = "#ef4444" if is_motion else "#555555"
+        self._motion_label.setStyleSheet(f"color: {color}; padding: 2px 0;")
+
+    def _on_tamper_changed(self, is_tamper: bool):
+        self._tamper_label.setText("🔴" if is_tamper else "⚫")
+        color = "#ef4444" if is_tamper else "#555555"
+        self._tamper_label.setStyleSheet(f"color: {color}; padding: 2px 0;")
+
+    def _on_intrusion_changed(self, is_intrusion: bool):
+        self._intrusion_label.setText("🔴" if is_intrusion else "⚫")
+        color = "#ef4444" if is_intrusion else "#555555"
+        self._intrusion_label.setStyleSheet(f"color: {color}; padding: 2px 0;")
 
     # ------------------------------------------------------------------
     # Actions

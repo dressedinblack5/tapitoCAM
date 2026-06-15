@@ -51,6 +51,8 @@ class MotionMonitor(QObject):
     """
 
     motion_changed = Signal(bool)
+    tamper_changed = Signal(bool)
+    intrusion_changed = Signal(bool)
     error_occurred = Signal(str)
 
     POLL_TIMEOUT = 10
@@ -62,6 +64,8 @@ class MotionMonitor(QObject):
         self._sub_url: str | None = None
         self._session: requests.Session | None = None
         self._last_motion: bool | None = None
+        self._last_tamper: bool | None = None
+        self._last_intrusion: bool | None = None
         self._thread: threading.Thread | None = None
         self._first_error_reported = False
 
@@ -208,12 +212,34 @@ class MotionMonitor(QObject):
 
         root = etree.fromstring(r.content)
         for msg in root.findall(".//wsnt:NotificationMessage", _NS):
+            # Motion
             motion_el = msg.find(
                 './/tt:Data/tt:SimpleItem[@Name="IsMotion"]', _NS
             )
-            if motion_el is None:
+            if motion_el is not None:
+                val = motion_el.get("Value", "false").lower() == "true"
+                if self._last_motion != val:
+                    self._last_motion = val
+                    self.motion_changed.emit(val)
                 continue
-            is_motion = motion_el.get("Value", "false").lower() == "true"
-            if self._last_motion != is_motion:
-                self._last_motion = is_motion
-                self.motion_changed.emit(is_motion)
+
+            # Tamper
+            tamper_el = msg.find(
+                './/tt:Data/tt:SimpleItem[@Name="IsTamper"]', _NS
+            )
+            if tamper_el is not None:
+                val = tamper_el.get("Value", "false").lower() == "true"
+                if self._last_tamper != val:
+                    self._last_tamper = val
+                    self.tamper_changed.emit(val)
+                continue
+
+            # Intrusion — look for any boolean SimpleItem
+            for item in msg.findall('.//tt:Data/tt:SimpleItem', _NS):
+                name = item.get("Name", "")
+                if "Intrusion" in name or "intrusion" in name.lower():
+                    val = item.get("Value", "false").lower() == "true"
+                    if self._last_intrusion != val:
+                        self._last_intrusion = val
+                        self.intrusion_changed.emit(val)
+                    break
