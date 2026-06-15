@@ -207,5 +207,93 @@ class TestPTZController(unittest.TestCase):
         )
 
 
+    # --- continuous_zoom ---
+
+    def test_continuous_zoom_creates_request(self):
+        mock_request = MagicMock()
+        self.ctrl.ptz = MagicMock()
+        self.ctrl.profile_token = "test-token"
+        self.ctrl.ptz.create_type.return_value = mock_request
+
+        self.ctrl.continuous_zoom(0.3)
+
+        self.ctrl.ptz.create_type.assert_called_once_with("ContinuousMove")
+        self.assertEqual(mock_request.ProfileToken, "test-token")
+        self.assertAlmostEqual(mock_request.Velocity["Zoom"]["x"], 0.3)
+        self.assertEqual(mock_request.Velocity["PanTilt"]["x"], 0.0)
+        self.assertEqual(mock_request.Velocity["PanTilt"]["y"], 0.0)
+        self.ctrl.ptz.ContinuousMove.assert_called_once_with(mock_request)
+
+    def test_continuous_zoom_noop_when_not_connected(self):
+        self.ctrl.continuous_zoom(0.3)  # must not raise
+
+    # --- presets ---
+
+    def test_get_presets_returns_list(self):
+        self.ctrl.ptz = MagicMock()
+        self.ctrl.profile_token = "tok"
+        mock_preset = MagicMock()
+        mock_preset.token = "preset1"
+        mock_preset.Name = "View 1"
+        self.ctrl.ptz.GetPresets.return_value = [mock_preset]
+
+        result = self.ctrl.get_presets()
+        self.ctrl.ptz.GetPresets.assert_called_once_with("tok")
+        self.assertEqual(result, [{"token": "preset1", "name": "View 1"}])
+
+    def test_get_presets_empty_when_not_connected(self):
+        result = self.ctrl.get_presets()
+        self.assertEqual(result, [])
+
+    def test_get_presets_handles_exception(self):
+        self.ctrl.ptz = MagicMock()
+        self.ctrl.profile_token = "tok"
+        self.ctrl.ptz.GetPresets.side_effect = RuntimeError("boom")
+        result = self.ctrl.get_presets()
+        self.assertEqual(result, [])
+
+    def test_goto_preset_creates_request(self):
+        mock_request = MagicMock()
+        self.ctrl.ptz = MagicMock()
+        self.ctrl.profile_token = "tok"
+        self.ctrl.ptz.create_type.return_value = mock_request
+
+        self.ctrl.goto_preset("preset1")
+        self.ctrl.ptz.create_type.assert_called_once_with("GotoPreset")
+        self.assertEqual(mock_request.ProfileToken, "tok")
+        self.assertEqual(mock_request.PresetToken, "preset1")
+        self.ctrl.ptz.GotoPreset.assert_called_once_with(mock_request)
+
+    def test_goto_preset_noop_when_not_connected(self):
+        self.ctrl.goto_preset("preset1")  # must not raise
+
+    def test_set_preset_creates_request(self):
+        mock_request = MagicMock()
+        mock_response = MagicMock()
+        mock_response.PresetToken = "newtoken"
+        self.ctrl.ptz = MagicMock()
+        self.ctrl.profile_token = "tok"
+        self.ctrl.ptz.create_type.return_value = mock_request
+        self.ctrl.ptz.SetPreset.return_value = mock_response
+
+        result = self.ctrl.set_preset("My Preset")
+        self.ctrl.ptz.create_type.assert_called_once_with("SetPreset")
+        self.assertEqual(mock_request.ProfileToken, "tok")
+        self.assertEqual(mock_request.PresetName, "My Preset")
+        self.ctrl.ptz.SetPreset.assert_called_once_with(mock_request)
+        self.assertEqual(result, "newtoken")
+
+    def test_set_preset_noop_when_not_connected(self):
+        result = self.ctrl.set_preset("test")
+        self.assertIsNone(result)
+
+    def test_set_preset_handles_exception(self):
+        self.ctrl.ptz = MagicMock()
+        self.ctrl.profile_token = "tok"
+        self.ctrl.ptz.SetPreset.side_effect = RuntimeError("boom")
+        result = self.ctrl.set_preset("test")
+        self.assertIsNone(result)
+
+
 if __name__ == "__main__":
     unittest.main()

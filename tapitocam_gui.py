@@ -175,6 +175,14 @@ class MainWindow(QMainWindow):
         ptz_grid.setContentsMargins(0, 0, 0, 0)
 
         btn_size = 48
+        small_btn_size = 40
+
+        # Zoom in
+        self._ptz_zoom_in = QPushButton("🔍+")
+        self._ptz_zoom_in.setFixedSize(small_btn_size, small_btn_size)
+        self._ptz_zoom_in.setEnabled(False)
+
+        # Pan / Tilt
         self._ptz_up = QPushButton("▲")
         self._ptz_up.setFixedSize(btn_size, btn_size)
         self._ptz_up.setEnabled(False)
@@ -195,11 +203,18 @@ class MainWindow(QMainWindow):
         self._ptz_stop_btn.setFixedSize(btn_size, btn_size)
         self._ptz_stop_btn.setEnabled(False)
 
-        ptz_grid.addWidget(self._ptz_up, 0, 1, Qt.AlignmentFlag.AlignCenter)
-        ptz_grid.addWidget(self._ptz_left, 1, 0, Qt.AlignmentFlag.AlignCenter)
-        ptz_grid.addWidget(self._ptz_stop_btn, 1, 1, Qt.AlignmentFlag.AlignCenter)
-        ptz_grid.addWidget(self._ptz_right, 1, 2, Qt.AlignmentFlag.AlignCenter)
-        ptz_grid.addWidget(self._ptz_down, 2, 1, Qt.AlignmentFlag.AlignCenter)
+        # Zoom out
+        self._ptz_zoom_out = QPushButton("🔍-")
+        self._ptz_zoom_out.setFixedSize(small_btn_size, small_btn_size)
+        self._ptz_zoom_out.setEnabled(False)
+
+        ptz_grid.addWidget(self._ptz_zoom_in, 0, 1, Qt.AlignmentFlag.AlignCenter)
+        ptz_grid.addWidget(self._ptz_up, 1, 1, Qt.AlignmentFlag.AlignCenter)
+        ptz_grid.addWidget(self._ptz_left, 2, 0, Qt.AlignmentFlag.AlignCenter)
+        ptz_grid.addWidget(self._ptz_stop_btn, 2, 1, Qt.AlignmentFlag.AlignCenter)
+        ptz_grid.addWidget(self._ptz_right, 2, 2, Qt.AlignmentFlag.AlignCenter)
+        ptz_grid.addWidget(self._ptz_down, 3, 1, Qt.AlignmentFlag.AlignCenter)
+        ptz_grid.addWidget(self._ptz_zoom_out, 4, 1, Qt.AlignmentFlag.AlignCenter)
 
         self._ptz_up.pressed.connect(lambda: self._ptz_move(0, 0.3))
         self._ptz_up.released.connect(self._ptz_stop)
@@ -210,12 +225,38 @@ class MainWindow(QMainWindow):
         self._ptz_right.pressed.connect(lambda: self._ptz_move(0.3, 0))
         self._ptz_right.released.connect(self._ptz_stop)
         self._ptz_stop_btn.clicked.connect(self._ptz_stop)
+        self._ptz_zoom_in.pressed.connect(lambda: self._ptz_zoom(0.3))
+        self._ptz_zoom_in.released.connect(self._ptz_stop)
+        self._ptz_zoom_out.pressed.connect(lambda: self._ptz_zoom(-0.3))
+        self._ptz_zoom_out.released.connect(self._ptz_stop)
 
         ptz_row = QHBoxLayout()
         ptz_row.addStretch()
         ptz_row.addWidget(ptz_widget)
         ptz_row.addStretch()
         info_layout.addLayout(ptz_row)
+
+        # Preset controls
+        preset_row = QHBoxLayout()
+        preset_row.setSpacing(6)
+        preset_row.addStretch()
+        self._preset_combo = QComboBox()
+        self._preset_combo.setMinimumWidth(140)
+        self._preset_combo.setEnabled(False)
+        self._preset_combo.addItem("— no presets —")
+        preset_row.addWidget(self._preset_combo)
+        self._preset_save_btn = QPushButton("Save")
+        self._preset_save_btn.setFixedWidth(56)
+        self._preset_save_btn.setEnabled(False)
+        self._preset_save_btn.clicked.connect(self._ptz_preset_save)
+        preset_row.addWidget(self._preset_save_btn)
+        self._preset_go_btn = QPushButton("Go")
+        self._preset_go_btn.setFixedWidth(44)
+        self._preset_go_btn.setEnabled(False)
+        self._preset_go_btn.clicked.connect(self._ptz_preset_go)
+        preset_row.addWidget(self._preset_go_btn)
+        preset_row.addStretch()
+        info_layout.addLayout(preset_row)
 
         layout.addWidget(info_panel, stretch=1)
 
@@ -277,6 +318,8 @@ class MainWindow(QMainWindow):
             self._stream_btn.setEnabled(False)
             self._quality_combo.setEnabled(False)
             self._set_ptz_enabled(False)
+            self._preset_combo.clear()
+            self._preset_combo.addItem("— no presets —")
             return
 
         camera = self._cfg.get_camera(camera_id)
@@ -292,6 +335,13 @@ class MainWindow(QMainWindow):
         )
         self._stream_btn.setEnabled(True)
         self._quality_combo.setEnabled(True)
+
+        # Reset preset selector until PTZ connects
+        self._preset_combo.clear()
+        self._preset_combo.addItem("— no presets —")
+        self._preset_combo.setEnabled(False)
+        self._preset_save_btn.setEnabled(False)
+        self._preset_go_btn.setEnabled(False)
 
         self._sync_ui()
 
@@ -541,6 +591,7 @@ class MainWindow(QMainWindow):
         def on_connected(success: bool, error: str):
             if success:
                 self._set_ptz_enabled(camera_id in self._processes)
+                self._ptz_preset_refresh()
                 self.status_bar.showMessage("PTZ ready", 3000)
             else:
                 self._set_ptz_enabled(False)
@@ -559,8 +610,15 @@ class MainWindow(QMainWindow):
             self._ptz_left,
             self._ptz_right,
             self._ptz_stop_btn,
+            self._ptz_zoom_in,
+            self._ptz_zoom_out,
         ):
             btn.setEnabled(enabled)
+        self._preset_save_btn.setEnabled(enabled)
+        self._preset_combo.setEnabled(enabled)
+        self._preset_go_btn.setEnabled(
+            enabled and self._preset_combo.currentData() is not None
+        )
 
     def _ptz_move(self, pan: float, tilt: float):
         if self._current_camera_id is None:
@@ -569,12 +627,65 @@ class MainWindow(QMainWindow):
         if ctrl:
             ctrl.continuous_move(pan, tilt)
 
+    def _ptz_zoom(self, velocity: float):
+        if self._current_camera_id is None:
+            return
+        ctrl = self._ptz_controllers.get(self._current_camera_id)
+        if ctrl:
+            ctrl.continuous_zoom(velocity)
+
     def _ptz_stop(self):
         if self._current_camera_id is None:
             return
         ctrl = self._ptz_controllers.get(self._current_camera_id)
         if ctrl:
             ctrl.stop()
+
+    def _ptz_preset_refresh(self):
+        if self._current_camera_id is None:
+            return
+        ctrl = self._ptz_controllers.get(self._current_camera_id)
+        if not ctrl or not ctrl.is_connected:
+            return
+        self._preset_combo.blockSignals(True)
+        self._preset_combo.clear()
+        presets = ctrl.get_presets()
+        if presets:
+            for p in presets:
+                self._preset_combo.addItem(p["name"], p["token"])
+        else:
+            self._preset_combo.addItem("— no presets —")
+        self._preset_combo.blockSignals(False)
+        self._preset_go_btn.setEnabled(
+            self._preset_combo.currentData() is not None
+        )
+
+    def _ptz_preset_save(self):
+        if self._current_camera_id is None:
+            return
+        ctrl = self._ptz_controllers.get(self._current_camera_id)
+        if not ctrl or not ctrl.is_connected:
+            return
+        camera = self._cfg.get_camera(self._current_camera_id)
+        name = camera.get("name", "Camera") if camera else "Camera"
+        preset_name = f"{name[:20]} pos"
+        token = ctrl.set_preset(preset_name)
+        if token:
+            self.status_bar.showMessage("Preset saved", 2000)
+            self._ptz_preset_refresh()
+        else:
+            self.status_bar.showMessage("Preset save failed", 2000)
+
+    def _ptz_preset_go(self):
+        if self._current_camera_id is None:
+            return
+        token = self._preset_combo.currentData()
+        if not token:
+            return
+        ctrl = self._ptz_controllers.get(self._current_camera_id)
+        if ctrl:
+            ctrl.goto_preset(str(token))
+            self.status_bar.showMessage("Moving to preset...", 2000)
 
     # ------------------------------------------------------------------
     # Actions

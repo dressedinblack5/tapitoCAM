@@ -106,6 +106,29 @@ class PTZController:
                 file=sys.stderr,
             )
 
+    def continuous_zoom(self, velocity: float):
+        if not self.ptz or not self.profile_token:
+            return
+        try:
+            request = self.ptz.create_type("ContinuousMove")
+            request.ProfileToken = self.profile_token
+            request.Velocity = {
+                "PanTilt": {"x": 0.0, "y": 0.0},
+                "Zoom": {
+                    "x": float(velocity),
+                    "space": (
+                        "http://www.onvif.org/ver10/tptz/"
+                        "ZoomSpaces/VelocityGenericSpace"
+                    ),
+                },
+            }
+            self.ptz.ContinuousMove(request)
+        except Exception as exc:
+            print(
+                f"[PTZ] Zoom failed: {exc}",
+                file=sys.stderr,
+            )
+
     def stop(self):
         if not self.ptz or not self.profile_token:
             return
@@ -120,6 +143,54 @@ class PTZController:
                 f"[PTZ] Stop failed: {exc}",
                 file=sys.stderr,
             )
+
+    # ------------------------------------------------------------------
+    # Presets
+    # ------------------------------------------------------------------
+
+    def get_presets(self) -> list[dict]:
+        """Return presets as ``[{token, name}, ...]``. Empty list on error."""
+        if not self.ptz or not self.profile_token:
+            return []
+        try:
+            presets = self.ptz.GetPresets(self.profile_token)
+            return [
+                {"token": p.token, "name": getattr(p, "Name", str(p.token))}
+                for p in presets
+            ]
+        except Exception:
+            return []
+
+    def goto_preset(self, preset_token: str):
+        if not self.ptz or not self.profile_token:
+            return
+        try:
+            request = self.ptz.create_type("GotoPreset")
+            request.ProfileToken = self.profile_token
+            request.PresetToken = preset_token
+            self.ptz.GotoPreset(request)
+        except Exception as exc:
+            print(
+                f"[PTZ] GotoPreset failed: {exc}",
+                file=sys.stderr,
+            )
+
+    def set_preset(self, name: str) -> str | None:
+        """Save current position as a preset. Returns the new preset token."""
+        if not self.ptz or not self.profile_token:
+            return None
+        try:
+            request = self.ptz.create_type("SetPreset")
+            request.ProfileToken = self.profile_token
+            request.PresetName = name
+            result = self.ptz.SetPreset(request)
+            return result.PresetToken if hasattr(result, "PresetToken") else None
+        except Exception as exc:
+            print(
+                f"[PTZ] SetPreset failed: {exc}",
+                file=sys.stderr,
+            )
+            return None
 
     @property
     def is_connected(self) -> bool:
