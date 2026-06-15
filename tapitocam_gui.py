@@ -348,6 +348,8 @@ class MainWindow(QMainWindow):
             self._set_zoom_enabled(False)
             self._preset_combo.clear()
             self._preset_combo.addItem("— no presets —")
+            self._preset_combo.clear()
+            self._preset_combo.addItem("— no presets —")
             return
 
         camera = self._cfg.get_camera(camera_id)
@@ -371,7 +373,7 @@ class MainWindow(QMainWindow):
 
         # Reset preset selector until PTZ connects
         self._preset_combo.clear()
-        self._preset_combo.addItem("— no presets —")
+        self._preset_combo.addItem("Loading presets...")
         self._preset_combo.setEnabled(False)
         self._preset_save_btn.setEnabled(False)
         self._preset_go_btn.setEnabled(False)
@@ -608,6 +610,7 @@ class MainWindow(QMainWindow):
                 is_streaming = camera_id in self._processes
                 self._set_pantilt_enabled(is_streaming)
                 self._set_zoom_enabled(is_streaming and ctrl.has_zoom)
+                self._ptz_preset_refresh()
                 self.status_bar.showMessage("PTZ ready", 3000)
                 return
 
