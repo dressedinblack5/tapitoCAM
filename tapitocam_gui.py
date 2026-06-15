@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (  # noqa: E402
     QFormLayout,
     QGridLayout,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QMainWindow,
     QMessageBox,
@@ -748,8 +749,13 @@ class MainWindow(QMainWindow):
             return
         camera = self._cfg.get_camera(self._current_camera_id)
         name = camera.get("name", "Camera") if camera else "Camera"
-        preset_name = f"{name[:20]} pos"
-        token = ctrl.set_preset(preset_name)
+        default = f"{name[:20]} pos"
+        preset_name, ok = QInputDialog.getText(
+            self, "Save Preset", "Preset name:", text=default
+        )
+        if not ok or not preset_name.strip():
+            return
+        token = ctrl.set_preset(preset_name.strip())
         if token:
             self.status_bar.showMessage("Preset saved", 2000)
             self._ptz_preset_refresh()
