@@ -9,7 +9,7 @@ import time
 
 import requests
 from lxml import etree
-from PySide6.QtCore import QObject, Signal, QTimer
+from PySide6.QtCore import QObject, Signal
 
 
 _PULL_SOAP = """\
@@ -40,14 +40,8 @@ class MotionMonitor(QObject):
 
     motion_changed = Signal(bool)
 
-    # How long PullMessages blocks waiting for an event
     POLL_TIMEOUT = 10
-
-    # How long to wait before reconnecting after a failure
-    _RECONNECT_DELAY = 3
-
-    # Subscription lifetime before renewal (camera default ~10 min)
-    _RENEW_BEFORE = 540  # seconds
+    _RENEW_BEFORE = 540  # seconds before subscription expiry
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -55,7 +49,6 @@ class MotionMonitor(QObject):
         self._sub_url: str | None = None
         self._session: requests.Session | None = None
         self._last_motion: bool | None = None
-        self._poll_timer: QTimer | None = None
         self._thread: threading.Thread | None = None
 
     # ------------------------------------------------------------------
@@ -63,8 +56,6 @@ class MotionMonitor(QObject):
     # ------------------------------------------------------------------
 
     def start(self, ip: str, user: str, password: str):
-        """Begin monitoring. Creates a PullPoint subscription and starts
-        the background polling thread."""
         if self._active:
             return
         self._active = True
@@ -78,9 +69,12 @@ class MotionMonitor(QObject):
         self._thread.start()
 
     def stop(self):
-        """Stop monitoring, tear down subscription, and wait for the
-        background thread to finish."""
         self._active = False
+        if self._sub_url and self._session:
+            try:
+                self._unsubscribe()
+            except Exception:
+                pass
         self._sub_url = None
         if self._session:
             try:
@@ -97,8 +91,8 @@ class MotionMonitor(QObject):
     # ------------------------------------------------------------------
 
     def _run(self, ip: str, user: str, password: str):
-        """Background thread entry point. Handles subscription lifecycle."""
-        sub_created = 0  # monotonic subscription start time
+        sub_created = 0
+        backoff = 1  # start with 1 second, exponential up to 60
 
         while self._active:
             try:
@@ -108,22 +102,36 @@ class MotionMonitor(QObject):
                 ):
                     self._subscribe(ip, user, password)
                     sub_created = time.monotonic()
+                    backoff = 1  # reset on success
 
                 self._poll()
             except Exception as exc:
-                print(
-                    f"[MotionMonitor] error: {exc}",
-                    file=sys.stderr,
-                )
+                msg = str(exc)
+                if "Unknown error: error" in msg or "Fault: error" in msg:
+                    # Camera limit: only one active subscription.
+                    # Old session's subscription may still be alive.
+                    print(
+                        f"[MotionMonitor] subscription limit — "
+                        f"retrying in {backoff}s",
+                        file=sys.stderr,
+                    )
+                else:
+                    print(
+                        f"[MotionMonitor] error: {exc}",
+                        file=sys.stderr,
+                    )
                 self._sub_url = None
-                # Wait before reconnecting
-                for _ in range(self._RECONNECT_DELAY):
+                for _ in range(backoff):
                     if not self._active:
                         return
                     time.sleep(1)
+                backoff = min(backoff * 2, 60)
+
+            # Periodically check liveness
+            if not self._active:
+                return
 
     def _subscribe(self, ip: str, user: str, password: str):
-        """Create a PullPoint subscription and extract the endpoint URL."""
         from onvif import ONVIFCamera
 
         cam = ONVIFCamera(ip, 2020, user, password)
@@ -145,8 +153,23 @@ class MotionMonitor(QObject):
 
         self._sub_url = addr
 
+    def _unsubscribe(self):
+        if not self._sub_url or not self._session:
+            return
+        body = (
+            '<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">'
+            '<s:Body>'
+            '<Unsubscribe xmlns="http://docs.oasis-open.org/wsn/b-2"/>'
+            '</s:Body></s:Envelope>'
+        )
+        self._session.post(
+            self._sub_url,
+            data=body,
+            headers={"Content-Type": "application/soap+xml"},
+            timeout=5,
+        )
+
     def _poll(self):
-        """Block up to POLL_TIMEOUT seconds waiting for events."""
         if not self._sub_url or not self._session:
             return
 
@@ -157,7 +180,6 @@ class MotionMonitor(QObject):
             headers={"Content-Type": "application/soap+xml"},
             timeout=self.POLL_TIMEOUT + 5,
         )
-        # Timeout / no events → empty response → wait for next poll
         if r.status_code != 200:
             return
 
