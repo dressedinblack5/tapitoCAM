@@ -1,3 +1,9 @@
-tapitocam.sh                 usr/bin/tapitocam
-tapitocam_gui.py             usr/bin/tapitocam-gui
-debian/tapitocam.desktop     usr/share/applications/tapitoCAM.desktop
+tapitocam.sh                        usr/bin/tapitocam
+tapitocam_gui.py                    usr/bin/tapitocam-gui
+tapitocam_cli.py                    usr/bin/
+cameratile.py                       usr/lib/python3/dist-packages/
+cameraconfig.py                     usr/lib/python3/dist-packages/
+cameradialog.py                     usr/lib/python3/dist-packages/
+styles.py                           usr/lib/python3/dist-packages/
+utils.py                            usr/lib/python3/dist-packages/
+debian/tapitocam.desktop            usr/share/applications/tapitoCAM.desktop

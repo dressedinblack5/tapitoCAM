@@ -1,7 +1,7 @@
 [Desktop Entry]
 Name=tapitoCAM
 Comment=TP-Link Tapo Camera RTSP Viewer & PTZ Controller
-Exec=tapitocam_gui.py
+Exec=/usr/bin/tapitocam-gui
 Icon=camera-app
 Terminal=false
 Type=Application
