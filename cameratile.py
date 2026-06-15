@@ -108,17 +108,10 @@ class PTZController(QObject):
         self._stop_requested.connect(self._worker.stop)
 
         self._worker.connected.connect(lambda ok, err: callback(ok, err))
-        self._worker.connected.connect(self._on_connected_finished)
 
         self._thread.started.connect(self._worker.run)
         self._thread.finished.connect(self._thread.deleteLater)
         self._thread.start()
-
-    def _on_connected_finished(self, success: bool, error: str):
-        """Clean up thread after connection attempt completes."""
-        if self._thread:
-            self._thread.quit()
-            self._thread.wait()
 
     def continuous_move(self, pan: float, tilt: float):
         if self._worker:
