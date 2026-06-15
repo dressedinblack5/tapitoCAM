@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (  # noqa: E402
 from cameraconfig import ConfigManager  # noqa: E402
 from cameradialog import CameraManagerDialog  # noqa: E402
 from cameratile import PTZController  # noqa: E402
+from motionmonitor import MotionMonitor  # noqa: E402
 from styles import DARK_THEME  # noqa: E402
 from utils import (  # noqa: E402
     build_rtsp_url,
@@ -69,6 +70,10 @@ class MainWindow(QMainWindow):
         # camera_id -> PTZController (synchronous, no threads)
         self._ptz_controllers: dict[int, PTZController] = {}
 
+        # Motion detection
+        self._motion_monitor = MotionMonitor(self)
+        self._motion_monitor.motion_changed.connect(self._on_motion_changed)
+
         self._current_camera_id: int | None = None
         self._updating_selector = False
 
@@ -82,8 +87,8 @@ class MainWindow(QMainWindow):
 
     def _init_ui(self):
         self.setWindowTitle("tapitoCAM")
-        self.setMinimumSize(500, 540)
-        self.resize(560, 580)
+        self.setMinimumSize(400, 580)
+        self.resize(400, 580)
 
         central = QWidget()
         central.setObjectName("central_widget")
@@ -147,6 +152,10 @@ class MainWindow(QMainWindow):
         self._status_label.setStyleSheet("color: #888888; padding: 2px 0;")
         detail_grid.addRow("IP:", self._ip_label)
         detail_grid.addRow("Status:", self._status_label)
+
+        self._motion_label = QLabel("⚫")
+        self._motion_label.setStyleSheet("color: #555555; padding: 2px 0;")
+        detail_grid.addRow("Motion:", self._motion_label)
         info_layout.addLayout(detail_grid)
 
         # Stream controls
@@ -335,7 +344,8 @@ class MainWindow(QMainWindow):
             self._status_label.setText("● —")
             self._stream_btn.setEnabled(False)
             self._quality_combo.setEnabled(False)
-            self._set_ptz_enabled(False)
+            self._set_pantilt_enabled(False)
+            self._set_zoom_enabled(False)
             self._preset_combo.clear()
             self._preset_combo.addItem("— no presets —")
             return
@@ -353,6 +363,11 @@ class MainWindow(QMainWindow):
         )
         self._stream_btn.setEnabled(True)
         self._quality_combo.setEnabled(True)
+
+        # Reset motion + preset state for new camera
+        self._motion_monitor.stop()
+        self._motion_label.setText("⚫")
+        self._motion_label.setStyleSheet("color: #555555; padding: 2px 0;")
 
         # Reset preset selector until PTZ connects
         self._preset_combo.clear()
@@ -404,7 +419,9 @@ class MainWindow(QMainWindow):
         if cam_id is not None:
             ctrl = self._ptz_controllers.get(cam_id)
             if ctrl is not None and ctrl.is_connected:
-                self._set_ptz_enabled(cam_id in self._processes)
+                is_streaming = cam_id in self._processes
+                self._set_pantilt_enabled(is_streaming)
+                self._set_zoom_enabled(is_streaming and ctrl.has_zoom)
 
     def _prune_dead_processes(self):
         """Remove mpv processes that have exited or report connection errors."""
@@ -510,6 +527,9 @@ class MainWindow(QMainWindow):
             self._processes[camera_id] = proc
             self._playlist_files[camera_id] = playlist_path
             self.status_bar.showMessage(f"Started: {title}", 3000)
+
+            # Start motion detection for this camera
+            self._motion_monitor.start(ip, username, password)
         except FileNotFoundError:
             os.unlink(playlist_path)
             QMessageBox.critical(
@@ -553,6 +573,7 @@ class MainWindow(QMainWindow):
             if camera
             else f"Camera {camera_id}"
         )
+        self._motion_monitor.stop()
         self.status_bar.showMessage(f"Stopped: {name}", 3000)
         self._sync_ui()
 
@@ -584,7 +605,9 @@ class MainWindow(QMainWindow):
         if camera_id in self._ptz_controllers:
             ctrl = self._ptz_controllers[camera_id]
             if ctrl.is_connected:
-                self._set_ptz_enabled(camera_id in self._processes)
+                is_streaming = camera_id in self._processes
+                self._set_pantilt_enabled(is_streaming)
+                self._set_zoom_enabled(is_streaming and ctrl.has_zoom)
                 self.status_bar.showMessage("PTZ ready", 3000)
                 return
 
@@ -602,17 +625,25 @@ class MainWindow(QMainWindow):
 
         # Create new controller if not exists
         if camera_id not in self._ptz_controllers:
-            self._ptz_controllers[camera_id] = PTZController()
+            name = camera.get("name", f"Camera {camera_id}")
+            self._ptz_controllers[camera_id] = PTZController(
+                on_error=lambda msg: self.status_bar.showMessage(
+                    f"PTZ error ({name}): {msg}", 5000
+                ),
+            )
 
         ctrl = self._ptz_controllers[camera_id]
 
         def on_connected(success: bool, error: str):
             if success:
-                self._set_ptz_enabled(camera_id in self._processes)
+                is_streaming = camera_id in self._processes
+                self._set_pantilt_enabled(is_streaming)
+                self._set_zoom_enabled(is_streaming and ctrl.has_zoom)
                 self._ptz_preset_refresh()
                 self.status_bar.showMessage("PTZ ready", 3000)
             else:
-                self._set_ptz_enabled(False)
+                self._set_pantilt_enabled(False)
+                self._set_zoom_enabled(False)
                 if is_auth_error(error):
                     msg = f"PTZ auth failed: {name} — check camera credentials"
                 else:
@@ -621,15 +652,14 @@ class MainWindow(QMainWindow):
 
         ctrl.connect_async(ip, user, password, on_connected)
 
-    def _set_ptz_enabled(self, enabled: bool):
+    def _set_pantilt_enabled(self, enabled: bool):
+        """Enable/disable pan, tilt, stop, and preset buttons."""
         for btn in (
             self._ptz_up,
             self._ptz_down,
             self._ptz_left,
             self._ptz_right,
             self._ptz_stop_btn,
-            self._ptz_zoom_in,
-            self._ptz_zoom_out,
         ):
             btn.setEnabled(enabled)
         self._preset_save_btn.setEnabled(enabled)
@@ -637,6 +667,11 @@ class MainWindow(QMainWindow):
         self._preset_go_btn.setEnabled(
             enabled and self._preset_combo.currentData() is not None
         )
+
+    def _set_zoom_enabled(self, enabled: bool):
+        """Enable/disable zoom buttons independently of pan/tilt."""
+        self._ptz_zoom_in.setEnabled(enabled)
+        self._ptz_zoom_out.setEnabled(enabled)
 
     def _ptz_move(self, pan: float, tilt: float):
         if self._current_camera_id is None:
@@ -705,6 +740,14 @@ class MainWindow(QMainWindow):
             ctrl.goto_preset(str(token))
             self.status_bar.showMessage("Moving to preset...", 2000)
 
+    def _on_motion_changed(self, is_motion: bool):
+        self._motion_label.setText("🔴" if is_motion else "⚫")
+        self._motion_label.setStyleSheet(
+            "color: #ef4444; padding: 2px 0;"
+            if is_motion
+            else "color: #555555; padding: 2px 0;"
+        )
+
     # ------------------------------------------------------------------
     # Actions
     # ------------------------------------------------------------------
@@ -728,6 +771,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         self._refresh_timer.stop()
+        self._motion_monitor.stop()
         self._stop_all()
         for ctrl in self._ptz_controllers.values():
             ctrl.cleanup()

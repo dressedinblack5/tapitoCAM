@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import sys
 import threading
+from collections.abc import Callable
 
 from onvif import ONVIFCamera
 from PySide6.QtCore import QTimer
@@ -17,14 +18,31 @@ class PTZController:
     After connection, PTZ commands (move, stop) are direct method calls
     in the calling thread — ONVIF-zeep uses plain HTTP/SOAP and is safe
     to call from the main thread.
+
+    Parameters
+    ----------
+    on_error:
+        Optional callback invoked with a human-readable error message
+        whenever a PTZ command fails.  Called from the **same thread**
+        that invoked the PTZ method (the main thread for GUI commands).
+        Use ``functools.partial`` or a ``lambda`` to add context.
     """
 
     ONVIF_PORT = 2020
 
-    def __init__(self):
+    def __init__(self, on_error: Callable[[str], None] | None = None):
         self.ptz = None
         self.profile_token = None
         self._thread: threading.Thread | None = None
+        self._on_error = on_error
+        self._has_zoom = False
+
+    def _report_error(self, context: str, exc: Exception):
+        """Log to stderr and forward to the optional callback."""
+        msg = f"[PTZ] {context}: {exc}"
+        print(msg, file=sys.stderr)
+        if self._on_error is not None:
+            self._on_error(msg)
 
     def _run_connect(
         self, host: str, user: str, password: str, callback
@@ -40,6 +58,13 @@ class PTZController:
 
             # Verify PTZ support by fetching configurations
             configs = self.ptz.GetConfigurations()
+
+            # Detect zoom support: ZoomLimits must exist and be non-None
+            self._has_zoom = bool(
+                configs
+                and hasattr(configs[0], "ZoomLimits")
+                and configs[0].ZoomLimits is not None
+            )
 
             # The ProfileToken for ContinuousMove / Stop must come from
             # a Media profile, NOT from a PTZ configuration token.
@@ -97,14 +122,17 @@ class PTZController:
                         "PanTiltSpaces/VelocityGenericSpace"
                     ),
                 },
-                "Zoom": {"x": 0.0},
+                "Zoom": {
+                    "x": 0.0,
+                    "space": (
+                        "http://www.onvif.org/ver10/tptz/"
+                        "ZoomSpaces/VelocityGenericSpace"
+                    ),
+                },
             }
             self.ptz.ContinuousMove(request)
         except Exception as exc:
-            print(
-                f"[PTZ] ContinuousMove failed: {exc}",
-                file=sys.stderr,
-            )
+            self._report_error("ContinuousMove failed", exc)
 
     def continuous_zoom(self, velocity: float):
         if not self.ptz or not self.profile_token:
@@ -113,7 +141,14 @@ class PTZController:
             request = self.ptz.create_type("ContinuousMove")
             request.ProfileToken = self.profile_token
             request.Velocity = {
-                "PanTilt": {"x": 0.0, "y": 0.0},
+                "PanTilt": {
+                    "x": 0.0,
+                    "y": 0.0,
+                    "space": (
+                        "http://www.onvif.org/ver10/tptz/"
+                        "PanTiltSpaces/VelocityGenericSpace"
+                    ),
+                },
                 "Zoom": {
                     "x": float(velocity),
                     "space": (
@@ -124,10 +159,7 @@ class PTZController:
             }
             self.ptz.ContinuousMove(request)
         except Exception as exc:
-            print(
-                f"[PTZ] Zoom failed: {exc}",
-                file=sys.stderr,
-            )
+            self._report_error("Zoom failed", exc)
 
     def stop(self):
         if not self.ptz or not self.profile_token:
@@ -139,10 +171,7 @@ class PTZController:
             request.Zoom = True
             self.ptz.Stop(request)
         except Exception as exc:
-            print(
-                f"[PTZ] Stop failed: {exc}",
-                file=sys.stderr,
-            )
+            self._report_error("Stop failed", exc)
 
     # ------------------------------------------------------------------
     # Presets
@@ -170,10 +199,7 @@ class PTZController:
             request.PresetToken = preset_token
             self.ptz.GotoPreset(request)
         except Exception as exc:
-            print(
-                f"[PTZ] GotoPreset failed: {exc}",
-                file=sys.stderr,
-            )
+            self._report_error("GotoPreset failed", exc)
 
     def set_preset(self, name: str) -> str | None:
         """Save current position as a preset. Returns the new preset token."""
@@ -191,15 +217,17 @@ class PTZController:
                 return result
             return str(result) if result else None
         except Exception as exc:
-            print(
-                f"[PTZ] SetPreset failed: {exc}",
-                file=sys.stderr,
-            )
+            self._report_error("SetPreset failed", exc)
             return None
 
     @property
     def is_connected(self) -> bool:
         return self.ptz is not None
+
+    @property
+    def has_zoom(self) -> bool:
+        """True if the camera exposes zoom limits in its PTZ configuration."""
+        return self._has_zoom
 
     def cleanup(self):
         self.ptz = None

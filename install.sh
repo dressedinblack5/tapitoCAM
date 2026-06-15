@@ -42,6 +42,7 @@ install -Dm755 "$SCRIPT_DIR/tapitocam_cli.py"      "$HOME/.local/bin/tapitocam-c
 install -Dm644 "$SCRIPT_DIR/cameraconfig.py"        "$HOME/.local/bin/cameraconfig.py"
 install -Dm644 "$SCRIPT_DIR/cameradialog.py"        "$HOME/.local/bin/cameradialog.py"
 install -Dm644 "$SCRIPT_DIR/cameratile.py"          "$HOME/.local/bin/cameratile.py"
+install -Dm644 "$SCRIPT_DIR/motionmonitor.py"        "$HOME/.local/bin/motionmonitor.py"
 install -Dm644 "$SCRIPT_DIR/styles.py"              "$HOME/.local/bin/styles.py"
 install -Dm644 "$SCRIPT_DIR/utils.py"               "$HOME/.local/bin/utils.py"
 
