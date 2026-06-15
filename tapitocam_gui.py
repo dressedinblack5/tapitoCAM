@@ -627,7 +627,7 @@ class MainWindow(QMainWindow):
                 is_streaming = camera_id in self._processes
                 self._set_pantilt_enabled(is_streaming)
                 self._set_zoom_enabled(is_streaming and ctrl.has_zoom)
-                self._ptz_preset_refresh()
+                self._ptz_preset_refresh(camera_id)
                 self.status_bar.showMessage("PTZ ready", 3000)
                 return
 
@@ -659,7 +659,7 @@ class MainWindow(QMainWindow):
                 is_streaming = camera_id in self._processes
                 self._set_pantilt_enabled(is_streaming)
                 self._set_zoom_enabled(is_streaming and ctrl.has_zoom)
-                self._ptz_preset_refresh()
+                self._ptz_preset_refresh(camera_id)
                 self.status_bar.showMessage("PTZ ready", 3000)
             else:
                 self._set_pantilt_enabled(False)
@@ -719,17 +719,38 @@ class MainWindow(QMainWindow):
         if ctrl:
             ctrl.stop()
 
-    def _ptz_preset_refresh(self):
-        if self._current_camera_id is None:
+    def _ptz_preset_refresh(self, camera_id: int | None = None):
+        """Refresh the preset dropdown for *camera_id* (default: current).
+        Only updates the combo if *camera_id* matches the currently
+        selected camera, preventing stale async callbacks from
+        overwriting the preset list of a different camera."""
+        cam_id = camera_id if camera_id is not None else self._current_camera_id
+        if cam_id is None or cam_id != self._current_camera_id:
             return
-        ctrl = self._ptz_controllers.get(self._current_camera_id)
+        ctrl = self._ptz_controllers.get(cam_id)
+        camera = self._cfg.get_camera(cam_id)
         if not ctrl or not ctrl.is_connected:
+            # Show cached presets from config if available
+            if camera and camera.get("presets"):
+                self._preset_combo.blockSignals(True)
+                self._preset_combo.clear()
+                for p in camera["presets"]:
+                    self._preset_combo.addItem(p["name"], p["token"])
+                self._preset_combo.blockSignals(False)
             return
+
         self._preset_combo.blockSignals(True)
         self._preset_combo.clear()
         presets = ctrl.get_presets()
         if presets:
             for p in presets:
+                self._preset_combo.addItem(p["name"], p["token"])
+            # Cache presets locally so they survive camera reboots
+            if camera:
+                self._cfg.update_camera(cam_id, {"presets": presets})
+        elif camera and camera.get("presets"):
+            # Camera lost presets — show cached
+            for p in camera["presets"]:
                 self._preset_combo.addItem(p["name"], p["token"])
         else:
             self._preset_combo.addItem("— no presets —")
