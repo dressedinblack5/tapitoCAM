@@ -27,6 +27,14 @@ _NS = {
     "tt": "http://www.onvif.org/ver10/schema",
 }
 
+# Errors that mean the camera is definitively unreachable — stop retrying.
+_FATAL_ERRORS = (
+    "No route to host",
+    "Connection refused",
+    "Name or service not known",
+    "Network is unreachable",
+)
+
 
 class MotionMonitor(QObject):
     """Polls ONVIF PullPoint for motion events, emits signals.
@@ -36,9 +44,14 @@ class MotionMonitor(QObject):
     ``motion_changed(is_motion: bool)``
         Fires when motion state changes (True = detected, False = cleared).
         Emitted in the **main** thread.
+
+    ``error_occurred(message: str)``
+        Fires when a fatal error occurs (camera unreachable, etc.).
+        Emitted in the **main** thread.
     """
 
     motion_changed = Signal(bool)
+    error_occurred = Signal(str)
 
     POLL_TIMEOUT = 10
     _RENEW_BEFORE = 540  # seconds before subscription expiry
@@ -50,6 +63,7 @@ class MotionMonitor(QObject):
         self._session: requests.Session | None = None
         self._last_motion: bool | None = None
         self._thread: threading.Thread | None = None
+        self._first_error_reported = False
 
     # ------------------------------------------------------------------
     # Public API
@@ -59,6 +73,7 @@ class MotionMonitor(QObject):
         if self._active:
             return
         self._active = True
+        self._first_error_reported = False
 
         self._session = requests.Session()
         self._session.auth = requests.auth.HTTPDigestAuth(user, password)
@@ -92,7 +107,7 @@ class MotionMonitor(QObject):
 
     def _run(self, ip: str, user: str, password: str):
         sub_created = 0
-        backoff = 1  # start with 1 second, exponential up to 60
+        backoff = 1
 
         while self._active:
             try:
@@ -102,32 +117,42 @@ class MotionMonitor(QObject):
                 ):
                     self._subscribe(ip, user, password)
                     sub_created = time.monotonic()
-                    backoff = 1  # reset on success
+                    backoff = 1
 
                 self._poll()
             except Exception as exc:
                 msg = str(exc)
-                if "Unknown error: error" in msg or "Fault: error" in msg:
-                    # Camera limit: only one active subscription.
-                    # Old session's subscription may still be alive.
-                    print(
-                        f"[MotionMonitor] subscription limit — "
-                        f"retrying in {backoff}s",
-                        file=sys.stderr,
-                    )
+                fatal = any(e in msg for e in _FATAL_ERRORS)
+                sub_limit = "Unknown error: error" in msg or "Fault: error" in msg
+
+                if fatal:
+                    # Camera unreachable — stop trying, inform user once
+                    if not self._first_error_reported:
+                        self._first_error_reported = True
+                        self.error_occurred.emit(f"Motion unavailable: {ip}")
+                    self.stop()
+                    return
+
+                if sub_limit:
+                    if not self._first_error_reported:
+                        self._first_error_reported = True
+                        print(
+                            f"[Motion] waiting for camera ({ip})...",
+                            file=sys.stderr,
+                        )
                 else:
                     print(
-                        f"[MotionMonitor] error: {exc}",
+                        f"[Motion] error ({ip}): {msg[:120]}",
                         file=sys.stderr,
                     )
+
                 self._sub_url = None
-                for _ in range(backoff):
+                for _ in range(min(backoff, 30)):
                     if not self._active:
                         return
                     time.sleep(1)
                 backoff = min(backoff * 2, 60)
 
-            # Periodically check liveness
             if not self._active:
                 return
 
@@ -139,7 +164,6 @@ class MotionMonitor(QObject):
         result = evt.CreatePullPointSubscription()
 
         ref = result.SubscriptionReference
-        # The URL is nested: Address._value_1 (zeep AttributedURIType)
         addr = None
         addr_attr = getattr(ref, "Address", None)
         if addr_attr is not None:
@@ -190,6 +214,6 @@ class MotionMonitor(QObject):
             if motion_el is None:
                 continue
             is_motion = motion_el.get("Value", "false").lower() == "true"
-            if is_motion != self._last_motion:
+            if self._last_motion != is_motion:
                 self._last_motion = is_motion
                 self.motion_changed.emit(is_motion)

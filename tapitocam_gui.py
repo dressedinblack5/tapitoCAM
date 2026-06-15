@@ -75,6 +75,9 @@ class MainWindow(QMainWindow):
         # Motion detection
         self._motion_monitor = MotionMonitor(self)
         self._motion_monitor.motion_changed.connect(self._on_motion_changed)
+        self._motion_monitor.error_occurred.connect(
+            lambda msg: self.status_bar.showMessage(msg, 4000)
+        )
 
         self._current_camera_id: int | None = None
         self._updating_selector = False
