@@ -3,8 +3,10 @@
 
 from __future__ import annotations
 
+import sys
 import threading
 
+from onvif import ONVIFCamera
 from PySide6.QtCore import QTimer
 
 
@@ -17,35 +19,67 @@ class PTZController:
     to call from the main thread.
     """
 
+    ONVIF_PORT = 2020
+
     def __init__(self):
         self.ptz = None
         self.profile_token = None
         self._thread: threading.Thread | None = None
 
-    def connect_async(self, ip: str, user: str, password: str, callback):
+    def _run_connect(
+        self, host: str, user: str, password: str, callback
+    ):
+        """Synchronous ONVIF connect — runs in a background thread.
+
+        Exposed as a separate method so tests can call it directly
+        without going through ``threading.Thread``.
+        """
+        try:
+            cam = ONVIFCamera(host, self.ONVIF_PORT, user, password)
+            self.ptz = cam.create_ptz_service()
+
+            # Verify PTZ support by fetching configurations
+            configs = self.ptz.GetConfigurations()
+
+            # The ProfileToken for ContinuousMove / Stop must come from
+            # a Media profile, NOT from a PTZ configuration token.
+            media = cam.create_media_service()
+            profiles = media.GetProfiles()
+            if profiles:
+                self.profile_token = profiles[0].token
+            elif configs:
+                # Fallback: use the first PTZ config token (some cameras
+                # accept this as a ProfileToken).
+                self.profile_token = configs[0].token
+            else:
+                self.cleanup()
+                QTimer.singleShot(
+                    0,
+                    lambda: callback(
+                        False,
+                        "No media profiles or PTZ configurations found",
+                    ),
+                )
+                return
+
+            ok, err = True, ""
+        except Exception as e:
+            self.cleanup()
+            ok, err = False, str(e)
+
+        QTimer.singleShot(0, lambda: callback(ok, err))
+
+    def connect_async(self, host: str, user: str, password: str, callback):
         """Start ONVIF connection in a background thread.
 
         ``callback(success: bool, error: str)`` is invoked in the **main**
         thread when the connection attempt finishes.
         """
-
-        def _run():
-            try:
-                from onvif import ONVIFCamera
-
-                cam = ONVIFCamera(ip, 2020, user, password)
-                self.ptz = cam.create_ptz_service()
-                configs = self.ptz.GetConfigurations()
-                self.profile_token = configs[0].token if configs else None
-                ok, err = True, ""
-            except Exception as e:
-                self.cleanup()
-                ok, err = False, str(e)
-
-            # Hoist callback result to the main thread
-            QTimer.singleShot(0, lambda: callback(ok, err))
-
-        self._thread = threading.Thread(target=_run, daemon=True)
+        self._thread = threading.Thread(
+            target=self._run_connect,
+            args=(host, user, password, callback),
+            daemon=True,
+        )
         self._thread.start()
 
     def continuous_move(self, pan: float, tilt: float):
@@ -66,8 +100,11 @@ class PTZController:
                 "Zoom": {"x": 0.0},
             }
             self.ptz.ContinuousMove(request)
-        except Exception:
-            pass
+        except Exception as exc:
+            print(
+                f"[PTZ] ContinuousMove failed: {exc}",
+                file=sys.stderr,
+            )
 
     def stop(self):
         if not self.ptz or not self.profile_token:
@@ -78,8 +115,11 @@ class PTZController:
             request.PanTilt = True
             request.Zoom = True
             self.ptz.Stop(request)
-        except Exception:
-            pass
+        except Exception as exc:
+            print(
+                f"[PTZ] Stop failed: {exc}",
+                file=sys.stderr,
+            )
 
     @property
     def is_connected(self) -> bool:

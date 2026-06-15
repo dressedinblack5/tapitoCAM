@@ -63,6 +63,27 @@ class TestPTZController(unittest.TestCase):
     def test_continuous_move_noop_when_no_ptz(self):
         self.ctrl.continuous_move(0.3, 0.0)
 
+    def test_continuous_move_prints_exception(self):
+        """Exception in ContinuousMove is printed to stderr, not swallowed."""
+        self.ctrl.ptz = MagicMock()
+        self.ctrl.profile_token = "tok"
+        self.ctrl.ptz.ContinuousMove.side_effect = RuntimeError("boom")
+
+        with patch("sys.stderr") as mock_stderr:
+            self.ctrl.continuous_move(0.3, 0.0)
+            written = "".join(
+                c.args[0] for c in mock_stderr.write.call_args_list
+            )
+            self.assertIn("[PTZ]", written)
+            self.assertIn("boom", written)
+
+    def test_continuous_move_does_not_raise(self):
+        """Exception in ContinuousMove is caught, not propagated."""
+        self.ctrl.ptz = MagicMock()
+        self.ctrl.profile_token = "tok"
+        self.ctrl.ptz.ContinuousMove.side_effect = RuntimeError("boom")
+        self.ctrl.continuous_move(0.3, 0.0)  # must not raise
+
     # --- stop ---
 
     def test_stop_creates_request(self):
@@ -82,6 +103,25 @@ class TestPTZController(unittest.TestCase):
     def test_stop_noop_when_not_connected(self):
         self.ctrl.stop()
 
+    def test_stop_prints_exception(self):
+        self.ctrl.ptz = MagicMock()
+        self.ctrl.profile_token = "tok"
+        self.ctrl.ptz.Stop.side_effect = RuntimeError("stop-boom")
+
+        with patch("sys.stderr") as mock_stderr:
+            self.ctrl.stop()
+            written = "".join(
+                c.args[0] for c in mock_stderr.write.call_args_list
+            )
+            self.assertIn("[PTZ]", written)
+            self.assertIn("stop-boom", written)
+
+    def test_stop_does_not_raise(self):
+        self.ctrl.ptz = MagicMock()
+        self.ctrl.profile_token = "tok"
+        self.ctrl.ptz.Stop.side_effect = RuntimeError("boom")
+        self.ctrl.stop()  # must not raise
+
     # --- async connect ---
 
     @patch("cameratile.QTimer")
@@ -93,6 +133,78 @@ class TestPTZController(unittest.TestCase):
         self.ctrl.connect_async("10.0.0.1", "user", "pass", callback)
         mock_thread.assert_called_once()
         mock_thread_instance.start.assert_called_once()
+
+    @patch("cameratile.QTimer")
+    @patch("cameratile.ONVIFCamera")
+    def test_connect_async_uses_media_profile_token(self, mock_cam_class, mock_timer):
+        """connect_async gets the token from GetProfiles, not GetConfigurations."""
+        mock_media = MagicMock()
+        mock_profile = MagicMock()
+        mock_profile.token = "media-token-123"
+        mock_media.GetProfiles.return_value = [mock_profile]
+
+        mock_ptz = MagicMock()
+        mock_config = MagicMock()
+        mock_config.token = "cfg-token-456"
+        mock_ptz.GetConfigurations.return_value = [mock_config]
+
+        mock_cam = MagicMock()
+        mock_cam.create_media_service.return_value = mock_media
+        mock_cam.create_ptz_service.return_value = mock_ptz
+        mock_cam_class.return_value = mock_cam
+
+        callback = MagicMock()
+        self.ctrl._run_connect("10.0.0.1", "u", "p", callback)
+
+        self.assertEqual(self.ctrl.profile_token, "media-token-123")
+        self.assertEqual(self.ctrl.ptz, mock_ptz)
+
+    @patch("cameratile.QTimer")
+    @patch("cameratile.ONVIFCamera")
+    def test_connect_async_falls_back_to_ptz_config_token(self, mock_cam_class, mock_timer):
+        """When GetProfiles returns empty, fall back to GetConfigurations token."""
+        mock_media = MagicMock()
+        mock_media.GetProfiles.return_value = []
+
+        mock_ptz = MagicMock()
+        mock_config = MagicMock()
+        mock_config.token = "cfg-token-789"
+        mock_ptz.GetConfigurations.return_value = [mock_config]
+
+        mock_cam = MagicMock()
+        mock_cam.create_media_service.return_value = mock_media
+        mock_cam.create_ptz_service.return_value = mock_ptz
+        mock_cam_class.return_value = mock_cam
+
+        callback = MagicMock()
+        self.ctrl._run_connect("10.0.0.1", "u", "p", callback)
+
+        self.assertEqual(self.ctrl.profile_token, "cfg-token-789")
+
+    @patch("cameratile.QTimer")
+    @patch("cameratile.ONVIFCamera")
+    def test_connect_async_no_profiles_no_configs(self, mock_cam_class, mock_timer):
+        """When both profiles and configs are empty, callback fires with False."""
+        mock_media = MagicMock()
+        mock_media.GetProfiles.return_value = []
+
+        mock_ptz = MagicMock()
+        mock_ptz.GetConfigurations.return_value = []
+
+        mock_cam = MagicMock()
+        mock_cam.create_media_service.return_value = mock_media
+        mock_cam.create_ptz_service.return_value = mock_ptz
+        mock_cam_class.return_value = mock_cam
+
+        callback = MagicMock()
+        self.ctrl._run_connect("10.0.0.1", "u", "p", callback)
+
+        # QTimer.singleShot(0, lambda: callback(False, ...))
+        args, _ = mock_timer.singleShot.call_args
+        args[1]()
+        callback.assert_called_once_with(
+            False, "No media profiles or PTZ configurations found"
+        )
 
 
 if __name__ == "__main__":
