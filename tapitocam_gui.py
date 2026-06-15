@@ -878,6 +878,8 @@ class MainWindow(QMainWindow):
         self._intrusion_count_label.setText(f"({self._intrusion_count})")
 
     def _on_motion_changed(self, is_motion: bool):
+        if self._current_camera_id is None:
+            return
         if is_motion:
             self._motion_count += 1
             self._save_alert_counts()
@@ -887,6 +889,8 @@ class MainWindow(QMainWindow):
         self._motion_label.setStyleSheet(f"color: {color}; padding: 2px 0;")
 
     def _on_tamper_changed(self, is_tamper: bool):
+        if self._current_camera_id is None:
+            return
         if is_tamper:
             self._tamper_count += 1
             self._save_alert_counts()
@@ -896,6 +900,8 @@ class MainWindow(QMainWindow):
         self._tamper_label.setStyleSheet(f"color: {color}; padding: 2px 0;")
 
     def _on_intrusion_changed(self, is_intrusion: bool):
+        if self._current_camera_id is None:
+            return
         if is_intrusion:
             self._intrusion_count += 1
             self._save_alert_counts()
