@@ -204,7 +204,10 @@ class MotionMonitor(QObject):
         r = self._session.post(
             self._sub_url,
             data=body,
-            headers={"Content-Type": "application/soap+xml"},
+            headers={
+                "Content-Type": "application/soap+xml; charset=utf-8",
+                "SOAPAction": '"http://docs.oasis-open.org/wsn/b-2/PullMessages"',
+            },
             timeout=self.POLL_TIMEOUT + 5,
         )
         if r.status_code != 200:
