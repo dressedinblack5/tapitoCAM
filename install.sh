@@ -46,15 +46,8 @@ install -Dm644 "$SCRIPT_DIR/styles.py"              "$HOME/.local/bin/styles.py"
 install -Dm644 "$SCRIPT_DIR/utils.py"               "$HOME/.local/bin/utils.py"
 
 # Install desktop entry
-DESKTOP_SOURCE="/home/dressedinblack/Escritorio/TapitoCAM.desktop"
 DESKTOP_DEST="$HOME/.local/share/applications/tapitoCAM.desktop"
-
-if [[ -f "$DESKTOP_SOURCE" ]]; then
-    install -Dm644 "$DESKTOP_SOURCE" "$DESKTOP_DEST"
-else
-    # Fallback: use dist/ template
-    install -Dm644 "$SCRIPT_DIR/dist/tapitoCAM.desktop" "$DESKTOP_DEST"
-fi
+install -Dm644 "$SCRIPT_DIR/dist/tapitoCAM.desktop" "$DESKTOP_DEST"
 
 # Fix desktop Exec path to point to installed location
 sed -i "s|Exec=.*|Exec=$HOME/.local/bin/tapitocam-gui|" "$DESKTOP_DEST"

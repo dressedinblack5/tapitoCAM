@@ -10,7 +10,7 @@ CONFIG_DIR="${HOME}/.config/tapitocam"
 ENV_FILE="${CONFIG_DIR}/.tapitocam.env"
 PYTHON_HELPER="${SCRIPT_DIR}/tapitocam_cli.py"
 # Fall back to system-wide installed helper
-[[ -f "$PYTHON_HELPER" ]] || PYTHON_HELPER="$(command -v tapitocam_cli.py 2>/dev/null || true)"
+[[ -f "$PYTHON_HELPER" ]] || PYTHON_HELPER="$(command -v tapitocam-cli-helper 2>/dev/null || true)"
 
 # ---------------------------------------------------------------------------
 # Dependencies

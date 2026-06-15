@@ -1,6 +1,6 @@
 tapitocam.sh                        usr/bin/tapitocam
 tapitocam_gui.py                    usr/bin/tapitocam-gui
-tapitocam_cli.py                    usr/bin/
+tapitocam_cli.py                    usr/bin/tapitocam-cli-helper
 cameratile.py                       usr/lib/python3/dist-packages/
 cameraconfig.py                     usr/lib/python3/dist-packages/
 cameradialog.py                     usr/lib/python3/dist-packages/
