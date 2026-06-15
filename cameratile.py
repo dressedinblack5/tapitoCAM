@@ -1,40 +1,53 @@
 #!/usr/bin/env python3
-"""Per-camera ONVIF PTZ controller — synchronous core with threaded connection."""
+"""Per-camera ONVIF PTZ controller — async connection, direct PTZ commands."""
 
 from __future__ import annotations
 
-from PySide6.QtCore import QObject, QThread, Signal, Slot
+import threading
+
+from PySide6.QtCore import QTimer
 
 
-class PTZWorker(QObject):
-    """Worker that runs ONVIF operations in a background thread."""
+class PTZController:
+    """PTZ controller for one camera.
 
-    connected = Signal(bool, str)  # success, error_message
+    Initial ONVIF connection runs in a background ``threading.Thread``.
+    After connection, PTZ commands (move, stop) are direct method calls
+    in the calling thread — ONVIF-zeep uses plain HTTP/SOAP and is safe
+    to call from the main thread.
+    """
 
-    def __init__(self, ip: str, user: str, password: str):
-        super().__init__()
-        self.ip = ip
-        self.user = user
-        self.password = password
+    def __init__(self):
         self.ptz = None
         self.profile_token = None
+        self._thread: threading.Thread | None = None
 
-    @Slot()
-    def run(self):
-        """Connect to ONVIF service. Emits connected(success, error)."""
-        try:
-            from onvif import ONVIFCamera
+    def connect_async(self, ip: str, user: str, password: str, callback):
+        """Start ONVIF connection in a background thread.
 
-            cam = ONVIFCamera(self.ip, 2020, self.user, self.password)
-            self.ptz = cam.create_ptz_service()
-            configs = self.ptz.GetConfigurations()
-            self.profile_token = configs[0].token if configs else None
-            self.connected.emit(True, "")
-        except Exception as e:
-            self.cleanup()
-            self.connected.emit(False, str(e))
+        ``callback(success: bool, error: str)`` is invoked in the **main**
+        thread when the connection attempt finishes.
+        """
 
-    @Slot(float, float)
+        def _run():
+            try:
+                from onvif import ONVIFCamera
+
+                cam = ONVIFCamera(ip, 2020, user, password)
+                self.ptz = cam.create_ptz_service()
+                configs = self.ptz.GetConfigurations()
+                self.profile_token = configs[0].token if configs else None
+                ok, err = True, ""
+            except Exception as e:
+                self.cleanup()
+                ok, err = False, str(e)
+
+            # Hoist callback result to the main thread
+            QTimer.singleShot(0, lambda: callback(ok, err))
+
+        self._thread = threading.Thread(target=_run, daemon=True)
+        self._thread.start()
+
     def continuous_move(self, pan: float, tilt: float):
         if not self.ptz or not self.profile_token:
             return
@@ -56,7 +69,6 @@ class PTZWorker(QObject):
         except Exception:
             pass
 
-    @Slot()
     def stop(self):
         if not self.ptz or not self.profile_token:
             return
@@ -69,67 +81,11 @@ class PTZWorker(QObject):
         except Exception:
             pass
 
-    def cleanup(self):
-        self.ptz = None
-        self.profile_token = None
-
     @property
     def is_connected(self) -> bool:
         return self.ptz is not None
 
-
-class PTZController(QObject):
-    """Thread-safe PTZ controller for one camera.
-
-    Connection runs in a background thread to avoid blocking the GUI.
-    PTZ commands (move, stop) are forwarded to the worker thread via signals.
-    """
-
-    # Signals to forward commands to the worker thread
-    _move_requested = Signal(float, float)
-    _stop_requested = Signal()
-
-    def __init__(self):
-        super().__init__()
-        self._thread: QThread | None = None
-        self._worker: PTZWorker | None = None
-
-    def connect_async(self, ip: str, user: str, password: str, callback):
-        """Start async connection. ``callback(success: bool, error: str)`` is called when done."""
-        # Clean up previous thread if finished
-        self.cleanup()
-
-        self._thread = QThread()
-        self._worker = PTZWorker(ip, user, password)
-        self._worker.moveToThread(self._thread)
-
-        # Wire signal forwarding
-        self._move_requested.connect(self._worker.continuous_move)
-        self._stop_requested.connect(self._worker.stop)
-
-        self._worker.connected.connect(lambda ok, err: callback(ok, err))
-
-        self._thread.started.connect(self._worker.run)
-        self._thread.finished.connect(self._thread.deleteLater)
-        self._thread.start()
-
-    def continuous_move(self, pan: float, tilt: float):
-        if self._worker:
-            self._move_requested.emit(pan, tilt)
-
-    def stop(self):
-        if self._worker:
-            self._stop_requested.emit()
-
-    @property
-    def is_connected(self) -> bool:
-        return self._worker is not None and self._worker.is_connected
-
     def cleanup(self):
-        if self._thread:
-            self._thread.quit()
-            self._thread.wait(1000)
-            self._thread = None
-        if self._worker:
-            self._worker.cleanup()
-            self._worker = None
+        self.ptz = None
+        self.profile_token = None
+        self._thread = None
