@@ -744,12 +744,12 @@ class MainWindow(QMainWindow):
             ctrl.stop()
 
     def _ptz_preset_refresh(self, camera_id: int | None = None):
-        """Refresh the preset dropdown for *camera_id* (default: current).
-        Only updates the combo if *camera_id* matches the currently
-        selected camera, preventing stale async callbacks from
-        overwriting the preset list of a different camera."""
+        """Refresh the preset dropdown for *camera_id* (default: current)."""
         cam_id = camera_id if camera_id is not None else self._current_camera_id
-        if cam_id is None or cam_id != self._current_camera_id:
+        if cam_id is None:
+            return
+        # Only update UI if this is still the current camera
+        if cam_id != self._current_camera_id:
             return
         ctrl = self._ptz_controllers.get(cam_id)
         camera = self._cfg.get_camera(cam_id)
