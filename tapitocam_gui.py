@@ -282,6 +282,11 @@ class MainWindow(QMainWindow):
         self._preset_go_btn.setEnabled(False)
         self._preset_go_btn.clicked.connect(self._ptz_preset_go)
         preset_row.addWidget(self._preset_go_btn)
+        self._preset_del_btn = QPushButton("✕")
+        self._preset_del_btn.setFixedSize(32, 32)
+        self._preset_del_btn.setEnabled(False)
+        self._preset_del_btn.clicked.connect(self._ptz_preset_delete)
+        preset_row.addWidget(self._preset_del_btn)
         preset_row.addStretch()
         info_layout.addLayout(preset_row)
 
@@ -377,6 +382,7 @@ class MainWindow(QMainWindow):
         self._preset_combo.setEnabled(False)
         self._preset_save_btn.setEnabled(False)
         self._preset_go_btn.setEnabled(False)
+        self._preset_del_btn.setEnabled(False)
 
         self._sync_ui()
 
@@ -670,6 +676,9 @@ class MainWindow(QMainWindow):
         self._preset_go_btn.setEnabled(
             enabled and self._preset_combo.currentData() is not None
         )
+        self._preset_del_btn.setEnabled(
+            enabled and self._preset_combo.currentData() is not None
+        )
 
     def _set_zoom_enabled(self, enabled: bool):
         """Enable/disable zoom buttons independently of pan/tilt."""
@@ -715,6 +724,9 @@ class MainWindow(QMainWindow):
         self._preset_go_btn.setEnabled(
             self._preset_combo.currentData() is not None
         )
+        self._preset_del_btn.setEnabled(
+            self._preset_combo.currentData() is not None
+        )
 
     def _ptz_preset_save(self):
         if self._current_camera_id is None:
@@ -742,6 +754,19 @@ class MainWindow(QMainWindow):
         if ctrl:
             ctrl.goto_preset(str(token))
             self.status_bar.showMessage("Moving to preset...", 2000)
+
+    def _ptz_preset_delete(self):
+        if self._current_camera_id is None:
+            return
+        token = self._preset_combo.currentData()
+        if not token:
+            return
+        ctrl = self._ptz_controllers.get(self._current_camera_id)
+        if ctrl and ctrl.remove_preset(str(token)):
+            self.status_bar.showMessage("Preset deleted", 2000)
+            self._ptz_preset_refresh()
+        else:
+            self.status_bar.showMessage("Failed to delete preset", 2000)
 
     def _on_motion_changed(self, is_motion: bool):
         self._motion_label.setText("🔴" if is_motion else "⚫")

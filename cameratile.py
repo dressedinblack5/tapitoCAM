@@ -220,6 +220,20 @@ class PTZController:
             self._report_error("SetPreset failed", exc)
             return None
 
+    def remove_preset(self, preset_token: str) -> bool:
+        """Delete a preset. Returns True on success."""
+        if not self.ptz or not self.profile_token:
+            return False
+        try:
+            request = self.ptz.create_type("RemovePreset")
+            request.ProfileToken = self.profile_token
+            request.PresetToken = preset_token
+            self.ptz.RemovePreset(request)
+            return True
+        except Exception as exc:
+            self._report_error("RemovePreset failed", exc)
+            return False
+
     @property
     def is_connected(self) -> bool:
         return self.ptz is not None
