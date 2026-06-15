@@ -160,7 +160,18 @@ class MainWindow(QMainWindow):
 
         self._motion_label = QLabel("⚫")
         self._motion_label.setStyleSheet("color: #555555; padding: 2px 0;")
-        detail_grid.addRow("Motion:", self._motion_label)
+        self._motion_count = 0
+        self._motion_count_label = QLabel("(0)")
+        self._motion_count_label.setStyleSheet("color: #666666; padding: 2px 0; font-size: 12px;")
+
+        motion_row = QHBoxLayout()
+        motion_row.setSpacing(4)
+        motion_row.setContentsMargins(0, 0, 0, 0)
+        motion_row.addWidget(self._motion_label)
+        motion_row.addWidget(self._motion_count_label)
+        motion_row.addStretch()
+
+        detail_grid.addRow("Motion:", motion_row)
         info_layout.addLayout(detail_grid)
 
         # Stream controls
@@ -388,6 +399,8 @@ class MainWindow(QMainWindow):
         # Reset motion + preset state for new camera
         self._motion_monitor.stop()
         self._motion_label.setText("⚫")
+        self._motion_count = 0
+        self._motion_count_label.setText("(0)")
         self._motion_label.setStyleSheet("color: #555555; padding: 2px 0;")
 
         # Reset preset selector until PTZ connects
@@ -819,7 +832,10 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage("Failed to delete preset", 2000)
 
     def _on_motion_changed(self, is_motion: bool):
+        if is_motion:
+            self._motion_count += 1
         self._motion_label.setText("🔴" if is_motion else "⚫")
+        self._motion_count_label.setText(f"({self._motion_count})")
         self._motion_label.setStyleSheet(
             "color: #ef4444; padding: 2px 0;"
             if is_motion
