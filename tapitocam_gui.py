@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (  # noqa: E402
     QMessageBox,
     QPushButton,
     QStatusBar,
+    QStyle,
     QVBoxLayout,
     QWidget,
 )
@@ -282,7 +283,10 @@ class MainWindow(QMainWindow):
         self._preset_go_btn.setEnabled(False)
         self._preset_go_btn.clicked.connect(self._ptz_preset_go)
         preset_row.addWidget(self._preset_go_btn)
-        self._preset_del_btn = QPushButton("✕")
+        self._preset_del_btn = QPushButton()
+        self._preset_del_btn.setIcon(
+            self.style().standardIcon(QStyle.StandardPixmap.SP_TrashIcon)
+        )
         self._preset_del_btn.setFixedSize(32, 32)
         self._preset_del_btn.setEnabled(False)
         self._preset_del_btn.clicked.connect(self._ptz_preset_delete)
