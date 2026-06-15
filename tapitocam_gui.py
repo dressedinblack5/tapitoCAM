@@ -168,21 +168,18 @@ class MainWindow(QMainWindow):
         info_layout.addLayout(stream_row)
 
         # PTZ controls
-        ptz_widget = QWidget()
-        ptz_widget.setObjectName("ptz_widget")
-        ptz_grid = QGridLayout(ptz_widget)
+        ptz_container = QVBoxLayout()
+        ptz_container.setSpacing(6)
+        ptz_container.setContentsMargins(0, 0, 0, 0)
+
+        # Direction pad
+        pad_widget = QWidget()
+        ptz_grid = QGridLayout(pad_widget)
         ptz_grid.setSpacing(4)
         ptz_grid.setContentsMargins(0, 0, 0, 0)
 
         btn_size = 48
-        small_btn_size = 40
 
-        # Zoom in
-        self._ptz_zoom_in = QPushButton("🔍+")
-        self._ptz_zoom_in.setFixedSize(small_btn_size, small_btn_size)
-        self._ptz_zoom_in.setEnabled(False)
-
-        # Pan / Tilt
         self._ptz_up = QPushButton("▲")
         self._ptz_up.setFixedSize(btn_size, btn_size)
         self._ptz_up.setEnabled(False)
@@ -203,18 +200,11 @@ class MainWindow(QMainWindow):
         self._ptz_stop_btn.setFixedSize(btn_size, btn_size)
         self._ptz_stop_btn.setEnabled(False)
 
-        # Zoom out
-        self._ptz_zoom_out = QPushButton("🔍-")
-        self._ptz_zoom_out.setFixedSize(small_btn_size, small_btn_size)
-        self._ptz_zoom_out.setEnabled(False)
-
-        ptz_grid.addWidget(self._ptz_zoom_in, 0, 1, Qt.AlignmentFlag.AlignCenter)
-        ptz_grid.addWidget(self._ptz_up, 1, 1, Qt.AlignmentFlag.AlignCenter)
-        ptz_grid.addWidget(self._ptz_left, 2, 0, Qt.AlignmentFlag.AlignCenter)
-        ptz_grid.addWidget(self._ptz_stop_btn, 2, 1, Qt.AlignmentFlag.AlignCenter)
-        ptz_grid.addWidget(self._ptz_right, 2, 2, Qt.AlignmentFlag.AlignCenter)
-        ptz_grid.addWidget(self._ptz_down, 3, 1, Qt.AlignmentFlag.AlignCenter)
-        ptz_grid.addWidget(self._ptz_zoom_out, 4, 1, Qt.AlignmentFlag.AlignCenter)
+        ptz_grid.addWidget(self._ptz_up, 0, 1, Qt.AlignmentFlag.AlignCenter)
+        ptz_grid.addWidget(self._ptz_left, 1, 0, Qt.AlignmentFlag.AlignCenter)
+        ptz_grid.addWidget(self._ptz_stop_btn, 1, 1, Qt.AlignmentFlag.AlignCenter)
+        ptz_grid.addWidget(self._ptz_right, 1, 2, Qt.AlignmentFlag.AlignCenter)
+        ptz_grid.addWidget(self._ptz_down, 2, 1, Qt.AlignmentFlag.AlignCenter)
 
         self._ptz_up.pressed.connect(lambda: self._ptz_move(0, 0.3))
         self._ptz_up.released.connect(self._ptz_stop)
@@ -225,16 +215,44 @@ class MainWindow(QMainWindow):
         self._ptz_right.pressed.connect(lambda: self._ptz_move(0.3, 0))
         self._ptz_right.released.connect(self._ptz_stop)
         self._ptz_stop_btn.clicked.connect(self._ptz_stop)
+
+        # Zoom row
+        zoom_row = QHBoxLayout()
+        zoom_row.setSpacing(8)
+        zoom_row.setContentsMargins(0, 0, 0, 0)
+        zoom_row.addStretch()
+
+        self._ptz_zoom_out = QPushButton("🔍-")
+        self._ptz_zoom_out.setFixedSize(btn_size, btn_size)
+        self._ptz_zoom_out.setEnabled(False)
+
+        self._ptz_zoom_in = QPushButton("🔍+")
+        self._ptz_zoom_in.setFixedSize(btn_size, btn_size)
+        self._ptz_zoom_in.setEnabled(False)
+
+        zoom_row.addWidget(self._ptz_zoom_out)
+        zoom_row.addWidget(self._ptz_zoom_in)
+        zoom_row.addStretch()
+
         self._ptz_zoom_in.pressed.connect(lambda: self._ptz_zoom(0.3))
         self._ptz_zoom_in.released.connect(self._ptz_stop)
         self._ptz_zoom_out.pressed.connect(lambda: self._ptz_zoom(-0.3))
         self._ptz_zoom_out.released.connect(self._ptz_stop)
 
-        ptz_row = QHBoxLayout()
-        ptz_row.addStretch()
-        ptz_row.addWidget(ptz_widget)
-        ptz_row.addStretch()
-        info_layout.addLayout(ptz_row)
+        # Assemble
+        pad_row = QHBoxLayout()
+        pad_row.addStretch()
+        pad_row.addWidget(pad_widget)
+        pad_row.addStretch()
+
+        ptz_container.addLayout(pad_row)
+        ptz_container.addLayout(zoom_row)
+
+        wrapper_row = QHBoxLayout()
+        wrapper_row.addStretch()
+        wrapper_row.addLayout(ptz_container)
+        wrapper_row.addStretch()
+        info_layout.addLayout(wrapper_row)
 
         # Preset controls
         preset_row = QHBoxLayout()
