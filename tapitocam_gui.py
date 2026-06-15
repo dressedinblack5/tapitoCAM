@@ -63,8 +63,8 @@ class MainWindow(QMainWindow):
         # camera_id -> subprocess.Popen (shared with global crash handler)
         self._processes: dict[int, subprocess.Popen] = _process_registry
 
-        # camera_id -> playlist temp file path (cleaned up on stop)
-        self._playlist_files: dict[int, str] = {}
+        # camera_id -> playlist temp file path (shared with global crash handler)
+        self._playlist_files: dict[int, str] = _playlist_registry
 
         # camera_id -> PTZController (synchronous, no threads)
         self._ptz_controllers: dict[int, PTZController] = {}
@@ -376,6 +376,12 @@ class MainWindow(QMainWindow):
                 dead.append((cid, rc))
         for cid, rc in dead:
             self._processes.pop(cid, None)
+            playlist = self._playlist_files.pop(cid, None)
+            if playlist:
+                try:
+                    os.unlink(playlist)
+                except OSError:
+                    pass
             camera = self._cfg.get_camera(cid)
             name = camera.get("name", f"Camera {cid}") if camera else f"Camera {cid}"
             if rc != 0:
@@ -612,10 +618,11 @@ class MainWindow(QMainWindow):
 # ===========================================================================
 
 _process_registry: dict[int, subprocess.Popen] = {}
+_playlist_registry: dict[int, str] = {}
 
 
 def _kill_all_processes():
-    """Kill all tracked mpv processes. Registered as atexit + signal handler."""
+    """Kill all tracked mpv processes and clean up playlist temp files."""
     for cid, proc in list(_process_registry.items()):
         try:
             os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
@@ -626,6 +633,12 @@ def _kill_all_processes():
             except Exception:
                 pass
     _process_registry.clear()
+    for path in _playlist_registry.values():
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+    _playlist_registry.clear()
 
 
 atexit.register(_kill_all_processes)

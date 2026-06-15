@@ -92,7 +92,8 @@ class TestPlaylistHelpers(unittest.TestCase):
         path = write_rtsp_playlist("rtsp://user:pass@1.2.3.4/stream1")
         try:
             self.assertTrue(os.path.isfile(path))
-            content = open(path).read()
+            with open(path) as f:
+                content = f.read()
             self.assertIn("rtsp://user:pass@1.2.3.4/stream1", content)
         finally:
             os.unlink(path)
