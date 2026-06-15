@@ -168,9 +168,15 @@ class MainWindow(QMainWindow):
 
         self._tamper_label = QLabel("⚫")
         self._tamper_label.setStyleSheet("color: #555555; padding: 2px 0;")
+        self._tamper_count = 0
+        self._tamper_count_label = QLabel("(0)")
+        self._tamper_count_label.setStyleSheet("color: #666666; padding: 2px 0; font-size: 12px;")
 
         self._intrusion_label = QLabel("⚫")
         self._intrusion_label.setStyleSheet("color: #555555; padding: 2px 0;")
+        self._intrusion_count = 0
+        self._intrusion_count_label = QLabel("(0)")
+        self._intrusion_count_label.setStyleSheet("color: #666666; padding: 2px 0; font-size: 12px;")
 
         alerts_row = QGridLayout()
         alerts_row.setSpacing(4)
@@ -180,8 +186,10 @@ class MainWindow(QMainWindow):
         alerts_row.addWidget(self._motion_count_label, 0, 2)
         alerts_row.addWidget(QLabel("Tamper:"), 1, 0)
         alerts_row.addWidget(self._tamper_label, 1, 1)
+        alerts_row.addWidget(self._tamper_count_label, 1, 2)
         alerts_row.addWidget(QLabel("Intrusion:"), 2, 0)
         alerts_row.addWidget(self._intrusion_label, 2, 1)
+        alerts_row.addWidget(self._intrusion_count_label, 2, 2)
 
         detail_grid.addRow("Alerts:", alerts_row)
         info_layout.addLayout(detail_grid)
@@ -408,11 +416,10 @@ class MainWindow(QMainWindow):
         self._stream_btn.setEnabled(True)
         self._quality_combo.setEnabled(True)
 
-        # Reset motion + preset state for new camera
+        # Load alert counters from previous sessions
         self._motion_monitor.stop()
+        self._load_alert_counts(camera)
         self._motion_label.setText("⚫")
-        self._motion_count = 0
-        self._motion_count_label.setText("(0)")
         self._motion_label.setStyleSheet("color: #555555; padding: 2px 0;")
         self._tamper_label.setText("⚫")
         self._tamper_label.setStyleSheet("color: #555555; padding: 2px 0;")
@@ -847,21 +854,53 @@ class MainWindow(QMainWindow):
         else:
             self.status_bar.showMessage("Failed to delete preset", 2000)
 
+    def _save_alert_counts(self):
+        if self._current_camera_id is None:
+            return
+        self._cfg.update_camera(
+            self._current_camera_id,
+            {
+                "alerts": {
+                    "motion": self._motion_count,
+                    "tamper": self._tamper_count,
+                    "intrusion": self._intrusion_count,
+                }
+            },
+        )
+
+    def _load_alert_counts(self, camera: dict):
+        alerts = camera.get("alerts", {})
+        self._motion_count = alerts.get("motion", 0)
+        self._motion_count_label.setText(f"({self._motion_count})")
+        self._tamper_count = alerts.get("tamper", 0)
+        self._tamper_count_label.setText(f"({self._tamper_count})")
+        self._intrusion_count = alerts.get("intrusion", 0)
+        self._intrusion_count_label.setText(f"({self._intrusion_count})")
+
     def _on_motion_changed(self, is_motion: bool):
         if is_motion:
             self._motion_count += 1
+            self._save_alert_counts()
         self._motion_label.setText("🔴" if is_motion else "⚫")
         self._motion_count_label.setText(f"({self._motion_count})")
         color = "#ef4444" if is_motion else "#555555"
         self._motion_label.setStyleSheet(f"color: {color}; padding: 2px 0;")
 
     def _on_tamper_changed(self, is_tamper: bool):
+        if is_tamper:
+            self._tamper_count += 1
+            self._save_alert_counts()
         self._tamper_label.setText("🔴" if is_tamper else "⚫")
+        self._tamper_count_label.setText(f"({self._tamper_count})")
         color = "#ef4444" if is_tamper else "#555555"
         self._tamper_label.setStyleSheet(f"color: {color}; padding: 2px 0;")
 
     def _on_intrusion_changed(self, is_intrusion: bool):
+        if is_intrusion:
+            self._intrusion_count += 1
+            self._save_alert_counts()
         self._intrusion_label.setText("🔴" if is_intrusion else "⚫")
+        self._intrusion_count_label.setText(f"({self._intrusion_count})")
         color = "#ef4444" if is_intrusion else "#555555"
         self._intrusion_label.setStyleSheet(f"color: {color}; padding: 2px 0;")
 
