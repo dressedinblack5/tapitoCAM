@@ -76,7 +76,7 @@ class MainWindow(QMainWindow):
         self._motion_monitor = MotionMonitor(self)
         self._motion_monitor.motion_changed.connect(self._on_motion_changed)
         self._motion_monitor.error_occurred.connect(
-            lambda msg: self.status_bar.showMessage(msg, 4000)
+            lambda msg: self.status_bar.showMessage(msg, 0)
         )
 
         self._current_camera_id: int | None = None
@@ -469,12 +469,12 @@ class MainWindow(QMainWindow):
                         if is_auth_error(text):
                             self.status_bar.showMessage(
                                 f"Auth failed: {name} — check username/password",
-                                6000,
+                                0,
                             )
                         else:
                             short = text.replace("\n", " ")[:120]
                             self.status_bar.showMessage(
-                                f"Stream error: {name} — {short}", 6000
+                                f"Stream error: {name} — {short}", 0
                             )
                         continue
 
@@ -493,7 +493,7 @@ class MainWindow(QMainWindow):
             name = camera.get("name", f"Camera {cid}") if camera else f"Camera {cid}"
             if rc != 0:
                 self.status_bar.showMessage(
-                    f"Stream failed: {name} (mpv exited with code {rc})", 5000
+                    f"Stream failed: {name} (mpv exited with code {rc})", 0
                 )
             else:
                 self.status_bar.showMessage(f"Stream ended: {name}", 3000)
@@ -564,11 +564,11 @@ class MainWindow(QMainWindow):
             err = str(e)
             if is_mpv_connection_error(err):
                 self.status_bar.showMessage(
-                    f"Stream error: {title} — {err}", 6000
+                    f"Stream error: {title} — {err}", 0
                 )
             else:
                 self.status_bar.showMessage(
-                    f"Stream failed: {err[:120]}", 5000
+                    f"Stream failed: {err[:120]}", 0
                 )
 
         self._sync_ui()
@@ -659,7 +659,7 @@ class MainWindow(QMainWindow):
             name = camera.get("name", f"Camera {camera_id}")
             self._ptz_controllers[camera_id] = PTZController(
                 on_error=lambda msg: self.status_bar.showMessage(
-                    f"PTZ error ({name}): {msg}", 5000
+                    f"PTZ error ({name}): {msg}", 0
                 ),
             )
 
@@ -681,7 +681,7 @@ class MainWindow(QMainWindow):
                     msg = f"PTZ auth failed: {name} — check camera credentials"
                 else:
                     msg = f"PTZ connection failed: {sanitize_onvif_error(error)}"
-                self.status_bar.showMessage(msg, 3000)
+                self.status_bar.showMessage(msg, 0)
 
         ctrl.connect_async(ip, user, password, on_connected)
 
