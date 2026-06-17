@@ -45,7 +45,7 @@ load_config() {
     [[ -f "$ENV_FILE" ]] || return 1
     local line
     while IFS= read -r line; do
-        [[ "$line" =~ ^#         ]] && continue
+        [[ "$line" =~ ^# ]] && continue
         [[ -z "$line"            ]] && continue
         [[ "$line" =~ ^TAPO_USER=(.*)$ ]] && TAPO_USER="${BASH_REMATCH[1]}"
         [[ "$line" =~ ^TAPO_PASS=(.*)$ ]] && TAPO_PASS=$(printf '%s' "${BASH_REMATCH[1]}" | base64 -d 2>/dev/null || printf '%s' "${BASH_REMATCH[1]}")
@@ -95,7 +95,8 @@ setup_config() {
     TAPO_QUALITY="${TAPO_QUALITY:-hd}"
 
     read -r -p "Save this camera? (y/n): " ans
-    if [[ "$ans" =~ ^[Yy]$ ]]; then
+    re_yes='^[Yy]$'
+    if [[ "$ans" =~ $re_yes ]]; then
         # Write via Python helper (or directly if Python not available)
         if [[ -f "$PYTHON_HELPER" ]]; then
             python3 -c "
@@ -126,6 +127,7 @@ print(f'Camera saved (id={new_id})')
             # Fallback to legacy .env
             save_env_config
         }
+    fi
     fi
 }
 

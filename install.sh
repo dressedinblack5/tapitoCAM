@@ -1,7 +1,31 @@
 #!/bin/bash
 set -euo pipefail
 
+REPO_URL="https://github.com/dressedinblack5/tapitoCAM"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# ── Self-bootstrap: download repo if running via curl | bash ──
+if [[ ! -f "$SCRIPT_DIR/tapitocam_gui.py" ]]; then
+    echo "Running standalone — downloading tapitoCAM..."
+    TMPDIR_INSTALL="$(mktemp -d)"
+    trap 'rm -rf "$TMPDIR_INSTALL"' EXIT
+
+    if command -v git &>/dev/null; then
+        git clone --depth 1 "$REPO_URL.git" "$TMPDIR_INSTALL/src" 2>/dev/null
+    elif command -v curl &>/dev/null; then
+        curl -fsSL "$REPO_URL/archive/refs/heads/main.tar.gz" | tar xz -C "$TMPDIR_INSTALL"
+        mv "$TMPDIR_INSTALL"/tapitoCAM-* "$TMPDIR_INSTALL/src"
+    elif command -v wget &>/dev/null; then
+        wget -qO- "$REPO_URL/archive/refs/heads/main.tar.gz" | tar xz -C "$TMPDIR_INSTALL"
+        mv "$TMPDIR_INSTALL"/tapitoCAM-* "$TMPDIR_INSTALL/src"
+    else
+        echo "Error: git, curl, or wget is required to download tapitoCAM."
+        exit 1
+    fi
+
+    SCRIPT_DIR="$TMPDIR_INSTALL/src"
+    echo ""
+fi
 
 echo "=== tapitoCAM Installer ==="
 
