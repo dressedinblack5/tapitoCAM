@@ -5,6 +5,15 @@ TP-Link Tapo Camera RTSP Client for Linux — multi-camera control center.
 ![GUI Preview](assets/gui-preview.png)
 ![Tapo Camera Preview](assets/tc-preview.png)
 
+## Recent Changes
+
+- **Major refactoring**: Simplified camera configuration with improved IP validation using `ipaddress` module
+- **Migration cleanup**: Removed legacy `.tapitocam.env` file migration code
+- **Code cleanup**: Streamlined validation and password handling
+- **Test updates**: Refactored test files to match new implementation
+
+See git history for full details.
+
 ## Features
 
 - Multi-camera support — any number of Tapo cameras
