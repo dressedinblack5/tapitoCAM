@@ -51,7 +51,7 @@ class ConfigManager:
     def _init_keyring():
         """Try to import keyring. Returns the module or None."""
         try:
-            import keyring  # noqa: F811
+            import keyring  # noqa: E402
             return keyring
         except ImportError:
             return None
@@ -205,6 +205,17 @@ class ConfigManager:
             self._keyring_delete(camera_id)
             return True
         return False
+
+    def reorder_cameras(self, from_index: int, to_index: int) -> bool:
+        cameras = self.load()
+        if not (0 <= from_index < len(cameras) and 0 <= to_index < len(cameras)):
+            return False
+        item = cameras.pop(from_index)
+        cameras.insert(to_index, item)
+        for i, cam in enumerate(cameras):
+            cam["id"] = i
+        self.save(cameras)
+        return True
 
     def get_camera(self, camera_id: int) -> dict | None:
         """Return a single camera dict or None."""

@@ -88,6 +88,9 @@ class MainWindow(QMainWindow):
         self._refresh_camera_list()
         self._migrate_if_needed()
 
+        if not self._cfg.load():
+            QTimer.singleShot(200, self._on_manage_cameras)
+
     # ------------------------------------------------------------------
     # UI
     # ------------------------------------------------------------------
@@ -398,8 +401,6 @@ class MainWindow(QMainWindow):
             self._set_zoom_enabled(False)
             self._preset_combo.clear()
             self._preset_combo.addItem("— no presets —")
-            self._preset_combo.clear()
-            self._preset_combo.addItem("— no presets —")
             return
 
         camera = self._cfg.get_camera(camera_id)
@@ -684,7 +685,6 @@ class MainWindow(QMainWindow):
         camera = self._cfg.get_camera(camera_id)
         if not camera:
             return
-        name = camera.get("name", f"Camera {camera_id}")
         ip = camera.get("ip", "")
         user = camera.get("username", "")
         password = camera.get("password", "")
@@ -918,17 +918,26 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _on_manage_cameras(self):
-        self._stop_all()
+        before = {c["id"]: c for c in self._cfg.load()}
         dialog = CameraManagerDialog(self, self._cfg)
-        before = [str(c) for c in self._cfg.load()]
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            cameras = self._cfg.load()
-            after = [str(c) for c in cameras]
-            if before != after:
-                self._refresh_camera_list()
-                self.status_bar.showMessage("Camera config updated", 3000)
-        else:
+        dialog.exec()
+        after = {c["id"]: c for c in self._cfg.load()}
+
+        removed_ids = set(before.keys()) - set(after.keys())
+        changed_ids = set()
+        for cid in set(before.keys()) & set(after.keys()):
+            b, a = before[cid], after[cid]
+            if b.get("ip") != a.get("ip") or b.get("username") != a.get("username") or b.get("password") != a.get("password"):
+                changed_ids.add(cid)
+
+        for cid in removed_ids | changed_ids:
+            if cid in self._processes:
+                self._stop_camera(cid)
+
+        if before != after:
             self._refresh_camera_list()
+            if removed_ids or changed_ids:
+                self.status_bar.showMessage("Camera config updated", 3000)
 
     # ------------------------------------------------------------------
     # Cleanup
