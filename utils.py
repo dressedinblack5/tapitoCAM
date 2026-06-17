@@ -4,8 +4,7 @@
 import os
 import re
 import tempfile
-import urllib.parse
-
+from urllib.parse import quote as urlquote
 
 # ---------------------------------------------------------------------------
 # Connection error patterns (shared between GUI and CLI)
@@ -54,34 +53,13 @@ def is_auth_error(text: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# IP validation
-# ---------------------------------------------------------------------------
-def validate_ip(ip: str) -> bool:
-    """Return True if *ip* is a valid IPv4 address."""
-    parts = ip.split(".")
-    if len(parts) != 4:
-        return False
-    for p in parts:
-        if not p.isdigit() or not 0 <= int(p) <= 255:
-            return False
-    return True
-
-
-# ---------------------------------------------------------------------------
 # URL encoding
 # ---------------------------------------------------------------------------
-def urlencode_component(value: str) -> str:
-    """URL-encode a single component (username or password)."""
-    return urllib.parse.quote(value, safe="")
-
-
 def build_rtsp_url(
     username: str, password: str, ip: str, stream: str = "stream1"
 ) -> str:
     """Build an RTSP URL for a Tapo camera."""
-    encoded_user = urlencode_component(username)
-    encoded_pass = urlencode_component(password)
-    return f"rtsp://{encoded_user}:{encoded_pass}@{ip}/{stream}"
+    return f"rtsp://{urlquote(username, safe='')}:{urlquote(password, safe='')}@{ip}/{stream}"
 
 
 # ---------------------------------------------------------------------------

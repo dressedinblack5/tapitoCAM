@@ -2,12 +2,10 @@
 """Configuration manager for multi-camera setup. Pure Python, no Qt."""
 
 import base64
+import ipaddress
 import json
 import os
 from pathlib import Path
-
-from utils import validate_ip
-
 
 CONFIG_DIR_DEFAULT = Path.home() / ".config" / "tapitocam"
 KEYRING_SERVICE = "tapitocam"
@@ -226,56 +224,17 @@ class ConfigManager:
         return None
 
     # ------------------------------------------------------------------
-    # Migration
-    # ------------------------------------------------------------------
-
-    #: Name of the legacy single-camera config file.
-    OLD_ENV_NAME = ".tapitocam.env"
-
-    def migrate_from_env(self) -> bool:
-        """Migrate the old single-camera ``.tapitocam.env`` to the new JSON
-        format.
-
-        Reads the old file, converts it to a single-entry JSON config, and
-        deletes the old file.  Returns True when a migration actually
-        happened, False if there was no old file to migrate.
-        """
-        old = self.config_dir / self.OLD_ENV_NAME
-        if not old.exists():
-            return False
-
-        entry: dict[str, str | int] = {}
-        with open(old) as f:
-            for line in f:
-                if "=" not in line:
-                    continue
-                key, _, value = line.partition("=")
-                key = key.strip()
-                val = value.strip()
-                if key == "TAPO_USER":
-                    entry["username"] = val
-                elif key == "TAPO_PASS":
-                    try:
-                        entry["password"] = base64.b64decode(val).decode()
-                    except Exception:
-                        entry["password"] = val
-                elif key == "TAPO_IP":
-                    entry["ip"] = val
-
-        if entry.get("username") and entry.get("password") and entry.get("ip"):
-            self.add_camera(entry)
-
-        old.unlink()
-        return True
-
-    # ------------------------------------------------------------------
-    # Validation helpers
+    # Validation
     # ------------------------------------------------------------------
 
     @staticmethod
     def validate_ip(ip: str) -> bool:
         """Return True if *ip* is a valid IPv4 address."""
-        return validate_ip(ip)
+        try:
+            ipaddress.IPv4Address(ip)
+            return True
+        except (ipaddress.AddressValueError, ValueError):
+            return False
 
     @staticmethod
     def validate_entry(entry: dict) -> tuple[bool, str]:
@@ -287,20 +246,8 @@ class ConfigManager:
         missing = [k for k in ("username", "password", "ip") if not entry.get(k)]
         if missing:
             return False, f"Missing fields: {', '.join(missing)}"
-        if not validate_ip(entry["ip"]):
+        try:
+            ipaddress.IPv4Address(entry["ip"])
+        except (ipaddress.AddressValueError, ValueError):
             return False, f"Invalid IP address: {entry['ip']}"
         return True, ""
-
-    # ------------------------------------------------------------------
-    # Password helpers
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def encode_password(password: str) -> str:
-        """Base64-encode a password (match existing scheme)."""
-        return base64.b64encode(password.encode()).decode()
-
-    @staticmethod
-    def decode_password(encoded: str) -> str:
-        """Base64-decode a password."""
-        return base64.b64decode(encoded).decode()

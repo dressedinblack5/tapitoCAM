@@ -107,7 +107,8 @@ class PTZController:
         )
         self._thread.start()
 
-    def continuous_move(self, pan: float, tilt: float):
+    def continuous_move(self, pan: float = 0.0, tilt: float = 0.0, zoom: float = 0.0):
+        """Send a ContinuousMove command. Defaults to no movement."""
         if not self.ptz or not self.profile_token:
             return
         try:
@@ -117,49 +118,16 @@ class PTZController:
                 "PanTilt": {
                     "x": float(pan),
                     "y": float(tilt),
-                    "space": (
-                        "http://www.onvif.org/ver10/tptz/"
-                        "PanTiltSpaces/VelocityGenericSpace"
-                    ),
+                    "space": "http://www.onvif.org/ver10/tptz/PanTiltSpaces/VelocityGenericSpace",
                 },
                 "Zoom": {
-                    "x": 0.0,
-                    "space": (
-                        "http://www.onvif.org/ver10/tptz/"
-                        "ZoomSpaces/VelocityGenericSpace"
-                    ),
+                    "x": float(zoom),
+                    "space": "http://www.onvif.org/ver10/tptz/ZoomSpaces/VelocityGenericSpace",
                 },
             }
             self.ptz.ContinuousMove(request)
         except Exception as exc:
             self._report_error("ContinuousMove failed", exc)
-
-    def continuous_zoom(self, velocity: float):
-        if not self.ptz or not self.profile_token:
-            return
-        try:
-            request = self.ptz.create_type("ContinuousMove")
-            request.ProfileToken = self.profile_token
-            request.Velocity = {
-                "PanTilt": {
-                    "x": 0.0,
-                    "y": 0.0,
-                    "space": (
-                        "http://www.onvif.org/ver10/tptz/"
-                        "PanTiltSpaces/VelocityGenericSpace"
-                    ),
-                },
-                "Zoom": {
-                    "x": float(velocity),
-                    "space": (
-                        "http://www.onvif.org/ver10/tptz/"
-                        "ZoomSpaces/VelocityGenericSpace"
-                    ),
-                },
-            }
-            self.ptz.ContinuousMove(request)
-        except Exception as exc:
-            self._report_error("Zoom failed", exc)
 
     def stop(self):
         if not self.ptz or not self.profile_token:

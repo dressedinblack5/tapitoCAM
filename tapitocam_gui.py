@@ -74,19 +74,19 @@ class MainWindow(QMainWindow):
 
         # Motion detection
         self._motion_monitor = MotionMonitor(self)
-        self._motion_monitor.motion_changed.connect(self._on_motion_changed)
-        self._motion_monitor.tamper_changed.connect(self._on_tamper_changed)
-        self._motion_monitor.intrusion_changed.connect(self._on_intrusion_changed)
+        self._motion_monitor.motion_changed.connect(lambda v: self._on_alert_changed("motion", v))
+        self._motion_monitor.tamper_changed.connect(lambda v: self._on_alert_changed("tamper", v))
+        self._motion_monitor.intrusion_changed.connect(lambda v: self._on_alert_changed("intrusion", v))
         self._motion_monitor.error_occurred.connect(
             lambda msg: self.status_bar.showMessage(msg, 0)
         )
 
         self._current_camera_id: int | None = None
         self._updating_selector = False
+        self._alert_counts = {"motion": 0, "tamper": 0, "intrusion": 0}
 
         self._init_ui()
         self._refresh_camera_list()
-        self._migrate_if_needed()
 
         if not self._cfg.load():
             QTimer.singleShot(200, self._on_manage_cameras)
@@ -165,19 +165,16 @@ class MainWindow(QMainWindow):
 
         self._motion_label = QLabel("⚫")
         self._motion_label.setStyleSheet("color: #555555; padding: 2px 0;")
-        self._motion_count = 0
         self._motion_count_label = QLabel("(0)")
         self._motion_count_label.setStyleSheet("color: #666666; padding: 2px 0; font-size: 12px;")
 
         self._tamper_label = QLabel("⚫")
         self._tamper_label.setStyleSheet("color: #555555; padding: 2px 0;")
-        self._tamper_count = 0
         self._tamper_count_label = QLabel("(0)")
         self._tamper_count_label.setStyleSheet("color: #666666; padding: 2px 0; font-size: 12px;")
 
         self._intrusion_label = QLabel("⚫")
         self._intrusion_label.setStyleSheet("color: #555555; padding: 2px 0;")
-        self._intrusion_count = 0
         self._intrusion_count_label = QLabel("(0)")
         self._intrusion_count_label.setStyleSheet("color: #666666; padding: 2px 0; font-size: 12px;")
 
@@ -355,11 +352,6 @@ class MainWindow(QMainWindow):
     # Camera list / selection
     # ------------------------------------------------------------------
 
-    def _migrate_if_needed(self):
-        if self._cfg.migrate_from_env():
-            self.status_bar.showMessage("Migrated old config to new format", 4000)
-            self._refresh_camera_list()
-
     def _refresh_camera_list(self):
         self._updating_selector = True
         self._camera_combo.blockSignals(True)
@@ -472,18 +464,8 @@ class MainWindow(QMainWindow):
         self._start_all_btn.setEnabled(has_any and not all_streaming)
         self._stop_all_btn.setEnabled(any_streaming)
 
-        # Sync PTZ enabled state — this runs on a 2s timer so it catches
-        # the case where streaming started *after* the async PTZ callback fired.
-        cam_id = self._current_camera_id
-        if cam_id is not None:
-            ctrl = self._ptz_controllers.get(cam_id)
-            if ctrl is not None and ctrl.is_connected:
-                is_streaming = cam_id in self._processes
-                self._set_pantilt_enabled(is_streaming)
-                self._set_zoom_enabled(is_streaming and ctrl.has_zoom)
-                # Refresh presets if combo is still empty
-                if self._preset_combo.count() == 1 and self._preset_combo.itemText(0) == "— no presets —":
-                    self._ptz_preset_refresh(cam_id)
+        # Sync PTZ state on timer tick
+        self._sync_ptz_state(cam_id)
 
     def _prune_dead_processes(self):
         """Remove mpv processes that have exited or report connection errors."""
@@ -669,16 +651,24 @@ class MainWindow(QMainWindow):
     # PTZ  (synchronous — no threads, UI-safe)
     # ------------------------------------------------------------------
 
+    def _sync_ptz_state(self, camera_id: int):
+        """Enable PTZ controls based on streaming + connection state."""
+        ctrl = self._ptz_controllers.get(camera_id)
+        if ctrl is None or not ctrl.is_connected:
+            return
+        is_streaming = camera_id in self._processes
+        self._set_pantilt_enabled(is_streaming)
+        self._set_zoom_enabled(is_streaming and ctrl.has_zoom)
+        if self._preset_combo.count() == 1 and self._preset_combo.itemText(0) == "— no presets —":
+            self._ptz_preset_refresh(camera_id)
+
     def _connect_ptz(self, camera_id: int):
         """Async ONVIF connect for a camera. Non-blocking."""
         # Don't re-connect if already cached and connected
         if camera_id in self._ptz_controllers:
             ctrl = self._ptz_controllers[camera_id]
             if ctrl.is_connected:
-                is_streaming = camera_id in self._processes
-                self._set_pantilt_enabled(is_streaming)
-                self._set_zoom_enabled(is_streaming and ctrl.has_zoom)
-                self._ptz_preset_refresh(camera_id)
+                self._sync_ptz_state(camera_id)
                 self.status_bar.showMessage("PTZ ready", 3000)
                 return
 
@@ -706,10 +696,7 @@ class MainWindow(QMainWindow):
 
         def on_connected(success: bool, error: str):
             if success:
-                is_streaming = camera_id in self._processes
-                self._set_pantilt_enabled(is_streaming)
-                self._set_zoom_enabled(is_streaming and ctrl.has_zoom)
-                self._ptz_preset_refresh(camera_id)
+                self._sync_ptz_state(camera_id)
                 self.status_bar.showMessage("PTZ ready", 3000)
             else:
                 self._set_pantilt_enabled(False)
@@ -752,14 +739,14 @@ class MainWindow(QMainWindow):
             return
         ctrl = self._ptz_controllers.get(self._current_camera_id)
         if ctrl:
-            ctrl.continuous_move(pan, tilt)
+            ctrl.continuous_move(pan=pan, tilt=tilt)
 
     def _ptz_zoom(self, velocity: float):
         if self._current_camera_id is None:
             return
         ctrl = self._ptz_controllers.get(self._current_camera_id)
         if ctrl:
-            ctrl.continuous_zoom(velocity)
+            ctrl.continuous_move(zoom=velocity)
 
     def _ptz_stop(self):
         if self._current_camera_id is None:
@@ -862,56 +849,35 @@ class MainWindow(QMainWindow):
             return
         self._cfg.update_camera(
             self._current_camera_id,
-            {
-                "alerts": {
-                    "motion": self._motion_count,
-                    "tamper": self._tamper_count,
-                    "intrusion": self._intrusion_count,
-                }
-            },
+            {"alerts": dict(self._alert_counts)},
         )
 
     def _load_alert_counts(self, camera: dict):
         alerts = camera.get("alerts", {})
-        self._motion_count = alerts.get("motion", 0)
-        self._motion_count_label.setText(f"({self._motion_count})")
-        self._tamper_count = alerts.get("tamper", 0)
-        self._tamper_count_label.setText(f"({self._tamper_count})")
-        self._intrusion_count = alerts.get("intrusion", 0)
-        self._intrusion_count_label.setText(f"({self._intrusion_count})")
+        for atype in ("motion", "tamper", "intrusion"):
+            self._alert_counts[atype] = alerts.get(atype, 0)
+            label = getattr(self, f"_{atype}_count_label")
+            label.setText(f"({self._alert_counts[atype]})")
 
-    def _on_motion_changed(self, is_motion: bool):
+    _ALERT_WIDGETS = {
+        "motion": ("_motion_label", "_motion_count_label"),
+        "tamper": ("_tamper_label", "_tamper_count_label"),
+        "intrusion": ("_intrusion_label", "_intrusion_count_label"),
+    }
+
+    def _on_alert_changed(self, alert_type: str, is_active: bool):
         if self._current_camera_id is None:
             return
-        if is_motion:
-            self._motion_count += 1
+        label_name, count_label_name = self._ALERT_WIDGETS[alert_type]
+        label = getattr(self, label_name)
+        count_label = getattr(self, count_label_name)
+        if is_active:
+            self._alert_counts[alert_type] += 1
             self._save_alert_counts()
-        self._motion_label.setText("🔴" if is_motion else "⚫")
-        self._motion_count_label.setText(f"({self._motion_count})")
-        color = "#ef4444" if is_motion else "#555555"
-        self._motion_label.setStyleSheet(f"color: {color}; padding: 2px 0;")
-
-    def _on_tamper_changed(self, is_tamper: bool):
-        if self._current_camera_id is None:
-            return
-        if is_tamper:
-            self._tamper_count += 1
-            self._save_alert_counts()
-        self._tamper_label.setText("🔴" if is_tamper else "⚫")
-        self._tamper_count_label.setText(f"({self._tamper_count})")
-        color = "#ef4444" if is_tamper else "#555555"
-        self._tamper_label.setStyleSheet(f"color: {color}; padding: 2px 0;")
-
-    def _on_intrusion_changed(self, is_intrusion: bool):
-        if self._current_camera_id is None:
-            return
-        if is_intrusion:
-            self._intrusion_count += 1
-            self._save_alert_counts()
-        self._intrusion_label.setText("🔴" if is_intrusion else "⚫")
-        self._intrusion_count_label.setText(f"({self._intrusion_count})")
-        color = "#ef4444" if is_intrusion else "#555555"
-        self._intrusion_label.setStyleSheet(f"color: {color}; padding: 2px 0;")
+        label.setText("🔴" if is_active else "⚫")
+        count_label.setText(f"({self._alert_counts[alert_type]})")
+        color = "#ef4444" if is_active else "#555555"
+        label.setStyleSheet(f"color: {color}; padding: 2px 0;")
 
     # ------------------------------------------------------------------
     # Actions

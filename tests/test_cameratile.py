@@ -215,7 +215,7 @@ class TestPTZController(unittest.TestCase):
         self.ctrl.profile_token = "test-token"
         self.ctrl.ptz.create_type.return_value = mock_request
 
-        self.ctrl.continuous_zoom(0.3)
+        self.ctrl.continuous_move(zoom=0.3)
 
         self.ctrl.ptz.create_type.assert_called_once_with("ContinuousMove")
         self.assertEqual(mock_request.ProfileToken, "test-token")
@@ -225,7 +225,7 @@ class TestPTZController(unittest.TestCase):
         self.ctrl.ptz.ContinuousMove.assert_called_once_with(mock_request)
 
     def test_continuous_zoom_noop_when_not_connected(self):
-        self.ctrl.continuous_zoom(0.3)  # must not raise
+        self.ctrl.continuous_move(zoom=0.3)  # must not raise
 
     # --- presets ---
 

@@ -9,7 +9,6 @@ from utils import (
     is_auth_error,
     is_mpv_connection_error,
     sanitize_onvif_error,
-    validate_ip,
     write_rtsp_playlist,
 )
 
@@ -65,19 +64,6 @@ class TestMpvConnectionError(unittest.TestCase):
 
     def test_empty_string(self):
         self.assertFalse(is_mpv_connection_error(""))
-
-
-class TestValidateIP(unittest.TestCase):
-    """Test validate_ip function."""
-
-    def test_valid_ip(self):
-        self.assertTrue(validate_ip("192.168.1.1"))
-
-    def test_invalid_ip_octet(self):
-        self.assertFalse(validate_ip("256.1.1.1"))
-
-    def test_invalid_ip_format(self):
-        self.assertFalse(validate_ip("not.an.ip"))
 
 
 # ---------------------------------------------------------------------------

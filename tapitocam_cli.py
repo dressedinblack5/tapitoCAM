@@ -2,11 +2,8 @@
 """CLI helper for tapitocam.sh — loads camera config and prints shell-parseable output."""
 
 import sys
-from pathlib import Path
 
 from cameraconfig import CONFIG_DIR_DEFAULT as CONFIG_DIR
-
-OLD_ENV_FILE = Path(CONFIG_DIR) / ".tapitocam.env"
 
 
 def load_json_config() -> list[dict]:
@@ -14,34 +11,6 @@ def load_json_config() -> list[dict]:
     from cameraconfig import ConfigManager
 
     return ConfigManager(CONFIG_DIR).load()
-
-
-def load_env_config() -> dict | None:
-    """Load single camera from legacy .env config."""
-    if not OLD_ENV_FILE.exists():
-        return None
-    import base64
-
-    entry = {}
-    with open(OLD_ENV_FILE) as f:
-        for line in f:
-            if "=" not in line:
-                continue
-            key, _, value = line.partition("=")
-            key = key.strip()
-            val = value.strip()
-            if key == "TAPO_USER":
-                entry["username"] = val
-            elif key == "TAPO_PASS":
-                try:
-                    entry["password"] = base64.b64decode(val).decode()
-                except Exception:
-                    entry["password"] = val
-            elif key == "TAPO_IP":
-                entry["ip"] = val
-    if entry.get("username") and entry["password"] and entry.get("ip"):
-        return entry
-    return None
 
 
 def print_camera_shell(camera: dict) -> None:
@@ -58,10 +27,6 @@ def print_camera_list() -> None:
     """Print all cameras for shell consumption."""
     cameras = load_json_config()
     if not cameras:
-        # Try legacy
-        env = load_env_config()
-        if env:
-            print_camera_shell(env)
         return
 
     # Print count
@@ -80,10 +45,6 @@ def print_single_camera(camera_id: int | None = None) -> bool:
     """Print a single camera (by id or first). Returns True if found."""
     cameras = load_json_config()
     if not cameras:
-        env = load_env_config()
-        if env:
-            print_camera_shell(env)
-            return True
         return False
 
     if camera_id is not None:

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Unit tests for the cameraconfig module."""
 
-import base64
 import tempfile
 import unittest
 from pathlib import Path
@@ -162,52 +161,6 @@ class TestConfigManager(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("Invalid IP", msg)
 
-    # ------------------------------------------------------------------
-    # Password helpers
-    # ------------------------------------------------------------------
-
-    def test_password_roundtrip(self):
-        original = "My$ecureP@ss!"
-        encoded = ConfigManager.encode_password(original)
-        decoded = ConfigManager.decode_password(encoded)
-        self.assertEqual(decoded, original)
-
-    def test_password_matches_existing_scheme(self):
-        """Ensure the encoding matches the existing scheme from
-        ``tapitocam_gui.py``:
-            ``base64.b64encode(password.encode()).decode()``
-        """
-        password = "test123"
-        expected = base64.b64encode(password.encode()).decode()
-        self.assertEqual(ConfigManager.encode_password(password), expected)
-
-    # ------------------------------------------------------------------
-    # Migration
-    # ------------------------------------------------------------------
-
-    def test_migrate_from_env_no_file(self):
-        """migrate_from_env returns False when no old env file exists."""
-        result = self.cfg.migrate_from_env()
-        self.assertFalse(result)
-
-    def test_migrate_from_env_creates_camera(self):
-        """migrate_from_env reads the old env and creates a camera entry."""
-        env_file = self.config_dir / ".tapitocam.env"
-        env_file.write_text(
-            "TAPO_USER=admin\nTAPO_PASS={}\nTAPO_IP=192.168.1.100\n".format(
-                base64.b64encode(b"secret").decode()
-            )
-        )
-
-        result = self.cfg.migrate_from_env()
-        self.assertTrue(result)
-        self.assertFalse(env_file.exists())  # old file deleted
-
-        cameras = self.cfg.load()
-        self.assertEqual(len(cameras), 1)
-        self.assertEqual(cameras[0]["username"], "admin")
-        self.assertEqual(cameras[0]["password"], "secret")
-        self.assertEqual(cameras[0]["ip"], "192.168.1.100")
 
 
 if __name__ == "__main__":

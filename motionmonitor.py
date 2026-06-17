@@ -1,53 +1,36 @@
 #!/usr/bin/env python3
-"""Motion detection via ONVIF PullPoint events."""
+"""Motion detection via ONVIF PullPoint events. Uses onvif-zeep, keeps lxml for xs:any parsing."""
 
 from __future__ import annotations
 
+import datetime
 import sys
 import threading
 import time
 
-import requests
 from lxml import etree
+from onvif import ONVIFCamera
 from PySide6.QtCore import QObject, Signal
 
-
-_PULL_SOAP = """\
-<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">
-  <s:Body>
-    <PullMessages xmlns="http://docs.oasis-open.org/wsn/b-2">
-      <Timeout>PT{timeout}S</Timeout>
-      <MessageLimit>10</MessageLimit>
-    </PullMessages>
-  </s:Body>
-</s:Envelope>"""
-
-_NS = {
-    "wsnt": "http://docs.oasis-open.org/wsn/b-2",
-    "tt": "http://www.onvif.org/ver10/schema",
-}
+_NS = {"tt": "http://www.onvif.org/ver10/schema"}
 
 # Errors that mean the camera is definitively unreachable — stop retrying.
 _FATAL_ERRORS = (
-    "No route to host",
-    "Connection refused",
-    "Name or service not known",
-    "Network is unreachable",
+    "no route to host",
+    "connection refused",
+    "name or service not known",
+    "network is unreachable",
 )
 
 
 class MotionMonitor(QObject):
     """Polls ONVIF PullPoint for motion events, emits signals.
 
-    **Signals**
-
-    ``motion_changed(is_motion: bool)``
-        Fires when motion state changes (True = detected, False = cleared).
-        Emitted in the **main** thread.
-
-    ``error_occurred(message: str)``
-        Fires when a fatal error occurs (camera unreachable, etc.).
-        Emitted in the **main** thread.
+    Signals emitted in the main thread:
+      motion_changed(is_motion: bool)
+      tamper_changed(is_tamper: bool)
+      intrusion_changed(is_intrusion: bool)
+      error_occurred(message: str)
     """
 
     motion_changed = Signal(bool)
@@ -56,13 +39,14 @@ class MotionMonitor(QObject):
     error_occurred = Signal(str)
 
     POLL_TIMEOUT = 10
-    _RENEW_BEFORE = 540  # seconds before subscription expiry
+    _RENEW_BEFORE = 540  # seconds — re-subscribe before expiry
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._active = False
-        self._sub_url: str | None = None
-        self._session: requests.Session | None = None
+        self._cam: ONVIFCamera | None = None
+        self._pullpoint = None
+        self._sub_service = None
         self._last_motion: bool | None = None
         self._last_tamper: bool | None = None
         self._last_intrusion: bool | None = None
@@ -79,28 +63,20 @@ class MotionMonitor(QObject):
         self._active = True
         self._first_error_reported = False
 
-        self._session = requests.Session()
-        self._session.auth = requests.auth.HTTPDigestAuth(user, password)
+        try:
+            self._cam = ONVIFCamera(ip, 2020, user, password, adjust_time=True)
+        except Exception as exc:
+            self._active = False
+            self.error_occurred.emit(f"ONVIF init failed: {exc}")
+            return
 
-        self._thread = threading.Thread(
-            target=self._run, args=(ip, user, password), daemon=True
-        )
+        self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
     def stop(self):
         self._active = False
-        if self._sub_url and self._session:
-            try:
-                self._unsubscribe()
-            except Exception:
-                pass
-        self._sub_url = None
-        if self._session:
-            try:
-                self._session.close()
-            except Exception:
-                pass
-            self._session = None
+        self._unsubscribe()
+        self._cam = None
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=2)
         self._thread = None
@@ -109,28 +85,62 @@ class MotionMonitor(QObject):
     # Internals
     # ------------------------------------------------------------------
 
-    def _run(self, ip: str, user: str, password: str):
+    def _subscribe(self):
+        """Create PullPoint subscription and bind services to its URL."""
+        self._unsubscribe()
+
+        evt = self._cam.create_events_service()
+        sub = evt.CreatePullPointSubscription()
+        sub_url = sub.SubscriptionReference.Address._value_1
+
+        self._pullpoint = self._cam.create_onvif_service(
+            "pullpoint", portType="PullPointSubscription"
+        )
+        self._pullpoint.ws_client.set_options(location=sub_url)
+
+        self._sub_service = self._cam.create_onvif_service("subscription")
+        self._sub_service.ws_client.set_options(location=sub_url)
+
+        return time.monotonic()
+
+    def _unsubscribe(self):
+        if self._sub_service is None:
+            return
+        try:
+            self._sub_service.Unsubscribe()
+        except Exception:
+            pass
+        self._pullpoint = None
+        self._sub_service = None
+
+    def _run(self):
         sub_created = 0
         backoff = 1
+        ip = ""
+        try:
+            # stash IP for error messages (ONVIFCamera doesn't expose it)
+            ip = self._cam.xaddrs.get(
+                "http://www.onvif.org/ver10/device/wsdl", ""
+            ).split(":")[1].lstrip("/") or "?"
+        except Exception:
+            pass
 
         while self._active:
             try:
-                if self._sub_url is None or (
+                if self._pullpoint is None or (
                     sub_created
                     and (time.monotonic() - sub_created) > self._RENEW_BEFORE
                 ):
-                    self._subscribe(ip, user, password)
-                    sub_created = time.monotonic()
+                    sub_created = self._subscribe()
                     backoff = 1
 
                 self._poll()
             except Exception as exc:
-                msg = str(exc)
+                msg = str(exc).lower()
                 fatal = any(e in msg for e in _FATAL_ERRORS)
-                sub_limit = "Unknown error: error" in msg or "Fault: error" in msg
+                sub_limit = "unknown error: error" in msg or "fault: error" in msg
 
                 if fatal:
-                    # Camera unreachable — stop trying, inform user once
                     if not self._first_error_reported:
                         self._first_error_reported = True
                         self.error_occurred.emit(f"Motion unavailable: {ip}")
@@ -140,17 +150,11 @@ class MotionMonitor(QObject):
                 if sub_limit:
                     if not self._first_error_reported:
                         self._first_error_reported = True
-                        print(
-                            f"[Motion] waiting for camera ({ip})...",
-                            file=sys.stderr,
-                        )
+                        print(f"[Motion] waiting for camera ({ip})...", file=sys.stderr)
                 else:
-                    print(
-                        f"[Motion] error ({ip}): {msg[:120]}",
-                        file=sys.stderr,
-                    )
+                    print(f"[Motion] error ({ip}): {str(exc)[:120]}", file=sys.stderr)
 
-                self._sub_url = None
+                self._unsubscribe()
                 for _ in range(min(backoff, 30)):
                     if not self._active:
                         return
@@ -160,65 +164,21 @@ class MotionMonitor(QObject):
             if not self._active:
                 return
 
-    def _subscribe(self, ip: str, user: str, password: str):
-        from onvif import ONVIFCamera
-
-        cam = ONVIFCamera(ip, 2020, user, password)
-        evt = cam.create_events_service()
-        result = evt.CreatePullPointSubscription()
-
-        ref = result.SubscriptionReference
-        addr = None
-        addr_attr = getattr(ref, "Address", None)
-        if addr_attr is not None:
-            raw = getattr(addr_attr, "_value_1", None)
-            if isinstance(raw, str):
-                addr = raw
-
-        if not addr:
-            raise RuntimeError("Failed to extract subscription address")
-
-        self._sub_url = addr
-
-    def _unsubscribe(self):
-        if not self._sub_url or not self._session:
-            return
-        body = (
-            '<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">'
-            '<s:Body>'
-            '<Unsubscribe xmlns="http://docs.oasis-open.org/wsn/b-2"/>'
-            '</s:Body></s:Envelope>'
-        )
-        self._session.post(
-            self._sub_url,
-            data=body,
-            headers={"Content-Type": "application/soap+xml"},
-            timeout=5,
-        )
-
     def _poll(self):
-        if not self._sub_url or not self._session:
+        if self._pullpoint is None:
             return
 
-        body = _PULL_SOAP.format(timeout=self.POLL_TIMEOUT)
-        r = self._session.post(
-            self._sub_url,
-            data=body,
-            headers={
-                "Content-Type": "application/soap+xml; charset=utf-8",
-                "SOAPAction": '"http://docs.oasis-open.org/wsn/b-2/PullMessages"',
-            },
-            timeout=self.POLL_TIMEOUT + 5,
+        msgs = self._pullpoint.PullMessages(
+            Timeout=datetime.timedelta(seconds=self.POLL_TIMEOUT),
+            MessageLimit=10,
         )
-        if r.status_code != 200:
-            return
+        for n in (msgs.NotificationMessage or []):
+            msg_elem = n.Message._value_1
+            if msg_elem is None:
+                continue
 
-        root = etree.fromstring(r.content)
-        for msg in root.findall(".//wsnt:NotificationMessage", _NS):
             # Motion
-            motion_el = msg.find(
-                './/tt:Data/tt:SimpleItem[@Name="IsMotion"]', _NS
-            )
+            motion_el = msg_elem.find('.//tt:Data/tt:SimpleItem[@Name="IsMotion"]', _NS)
             if motion_el is not None:
                 val = motion_el.get("Value", "false").lower() == "true"
                 if self._last_motion != val:
@@ -227,9 +187,7 @@ class MotionMonitor(QObject):
                 continue
 
             # Tamper
-            tamper_el = msg.find(
-                './/tt:Data/tt:SimpleItem[@Name="IsTamper"]', _NS
-            )
+            tamper_el = msg_elem.find('.//tt:Data/tt:SimpleItem[@Name="IsTamper"]', _NS)
             if tamper_el is not None:
                 val = tamper_el.get("Value", "false").lower() == "true"
                 if self._last_tamper != val:
@@ -237,10 +195,10 @@ class MotionMonitor(QObject):
                     self.tamper_changed.emit(val)
                 continue
 
-            # Intrusion — look for any boolean SimpleItem
-            for item in msg.findall('.//tt:Data/tt:SimpleItem', _NS):
+            # Intrusion
+            for item in msg_elem.findall('.//tt:Data/tt:SimpleItem', _NS):
                 name = item.get("Name", "")
-                if "Intrusion" in name or "intrusion" in name.lower():
+                if "intrusion" in name.lower():
                     val = item.get("Value", "false").lower() == "true"
                     if self._last_intrusion != val:
                         self._last_intrusion = val
