@@ -10,7 +10,8 @@ TP-Link Tapo Camera RTSP Client for Linux — multi-camera control center.
 - Multi-camera support — any number of Tapo cameras
 - Standalone mpv streaming — one window per camera (Wayland-friendly)
 - Full PTZ — pan, tilt, zoom, presets via ONVIF
-- Motion detection — live ⚫/🔴 indicator
+- Motion, tamper, and intrusion detection — live ⚫/🔴 indicators via ONVIF PullPoint events
+- Alert counters persist across sessions per camera
 - HD / SD quality per camera
 - OS keyring password storage
 - CLI viewer with quality selection
@@ -18,12 +19,18 @@ TP-Link Tapo Camera RTSP Client for Linux — multi-camera control center.
 ## Install
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/dressedinblack5/tapitoCAM/main/install.sh | bash
+```
+
+Or clone and install manually:
+
+```bash
 git clone https://github.com/dressedinblack5/tapitoCAM.git
 cd tapitoCAM
 ./install.sh
 ```
 
-Requires: `mpv`, `python3`, `pyside6`, `onvif-zeep`. Optional: `keyring`.
+Requires: `mpv`, `ffmpeg`, `python3`, `pyside6`, `onvif-zeep`, `requests`, `lxml`. Optional: `keyring`.
 
 Or run without installing: `./tapitocam_gui.py` (GUI) / `./tapitocam.sh` (CLI).
 
@@ -46,7 +53,9 @@ Create a **Camera Account** in the Tapo app: gear → Advanced Settings → Came
 
 Controls lock until streaming. PTZ connects async (1–3s), UI stays responsive.
 
-Motion indicator (⚫/🔴) updates when the camera detects movement.
+Motion, tamper, and intrusion detection use ONVIF PullPoint events on the event
+stream. Indicators show ⚫ (no event) / 🔴 (event active). Alert counters
+persist per camera across sessions and are stored in the camera config.
 
 Presets are stored on the camera and cached locally. Each camera's presets
 are isolated. Saving a preset prompts for a name.

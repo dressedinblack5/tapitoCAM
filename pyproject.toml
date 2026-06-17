@@ -1,0 +1,27 @@
+[project]
+name = "tapitocam"
+version = "1.2.0"
+description = "TP-Link Tapo Camera RTSP Client for Linux — multi-camera control center"
+requires-python = ">=3.10"
+license = {text = "Apache-2.0"}
+
+[tool.ruff]
+# Target Python 3.10 (matches `Path | None` syntax usage)
+target-version = "py310"
+line-length = 88
+
+[tool.ruff.lint]
+# E: pycodestyle, F: pyflakes, I: isort, N: pep8-naming
+select = ["E", "F", "I", "N", "UP", "B", "SIM", "ARG"]
+
+# Permissive on naming: allow short vars in tight scopes
+ignore = [
+    "N802",  # function name should be lowercase (allow _underscore prefixed)
+    "N803",  # argument name should be lowercase
+    "N806",  # variable in function should be lowercase
+    "N812",  # lowercase imported as non lowercase
+    "E501",  # line too long (ruff handles this via line-length)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["N"]
