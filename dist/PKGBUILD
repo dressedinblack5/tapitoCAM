@@ -22,6 +22,7 @@ source=(
   "cameratile.py"
   "cameraconfig.py"
   "cameradialog.py"
+  "motionmonitor.py"
   "styles.py"
   "utils.py"
   "tapitoCAM.desktop"
@@ -38,6 +39,7 @@ package() {
   install -Dm644 "$srcdir/cameratile.py"       "$pkgdir/$python_site/"
   install -Dm644 "$srcdir/cameraconfig.py"     "$pkgdir/$python_site/"
   install -Dm644 "$srcdir/cameradialog.py"     "$pkgdir/$python_site/"
+  install -Dm644 "$srcdir/motionmonitor.py"    "$pkgdir/$python_site/"
   install -Dm644 "$srcdir/styles.py"           "$pkgdir/$python_site/"
   install -Dm644 "$srcdir/utils.py"            "$pkgdir/$python_site/"
 
