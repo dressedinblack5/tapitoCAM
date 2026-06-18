@@ -4,7 +4,6 @@ tapitocam_cli.py                    usr/bin/tapitocam-cli-helper
 cameratile.py                       usr/lib/python3/dist-packages/
 cameraconfig.py                     usr/lib/python3/dist-packages/
 cameradialog.py                     usr/lib/python3/dist-packages/
-motionmonitor.py                    usr/lib/python3/dist-packages/
 styles.py                           usr/lib/python3/dist-packages/
 utils.py                            usr/lib/python3/dist-packages/
 debian/tapitocam.desktop            usr/share/applications/tapitoCAM.desktop
