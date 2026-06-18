@@ -32,6 +32,24 @@ QPushButton:checked {
     border-color: #3b82f6;
     color: #ffffff;
 }
+QPushButton#stream_btn {
+    background: #2563eb;
+    border-color: #3b82f6;
+    color: #ffffff;
+    font-weight: 600;
+}
+QPushButton#stream_btn:hover {
+    background: #3b82f6;
+    border-color: #60a5fa;
+}
+QPushButton#stream_btn:pressed {
+    background: #1d4ed8;
+}
+QPushButton#stream_btn:disabled {
+    background: #1a1a1a;
+    color: #666666;
+    border-color: #2a2a2a;
+}
 QComboBox {
     border: 1px solid #3a3a3a;
     border-radius: 6px;

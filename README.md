@@ -19,8 +19,6 @@ See git history for full details.
 - Multi-camera support — any number of Tapo cameras
 - Standalone mpv streaming — one window per camera (Wayland-friendly)
 - Full PTZ — pan, tilt, zoom, presets via ONVIF
-- Motion detection — live ⚫/🔴 indicator via ONVIF PullPoint events
-- Alert counters persist across sessions per camera
 - HD / SD quality per camera
 - OS keyring password storage
 - CLI viewer with quality selection
@@ -68,10 +66,6 @@ Tapo App → Me → Third‑Party Compatibility → On.
 
 Controls lock until streaming. PTZ connects async (1–3s), UI stays responsive.
 
-Motion detection uses ONVIF PullPoint events on the event
-stream. The indicator shows ⚫ (no motion) / 🔴 (motion detected). Alert counters
-persist per camera across sessions and are stored in the camera config.
-
 Presets are stored on the camera and cached locally. Each camera's presets
 are isolated. Saving a preset prompts for a name.
 
@@ -103,8 +97,8 @@ The library *should* work with any other Tapo camera exposing the HTTPS
 management API. If you have success with an unlisted model, please open
 an issue.
 
-> Note: Battery/solar‑powered devices may not expose ONVIF (motion events)
-> or RTSP, but pytapo management API (night mode, LED) should still work.
+> Note: Battery/solar‑powered devices may not expose ONVIF or RTSP,
+> but pytapo management API (night mode, LED) should still work.
 
 ### CLI
 
@@ -128,8 +122,7 @@ Error messages are sanitized before display.
 rm -f ~/.local/bin/tapitocam ~/.local/bin/tapitocam-gui \
       ~/.local/bin/tapitocam-cli-helper \
       ~/.local/bin/cameraconfig.py ~/.local/bin/cameradialog.py \
-      ~/.local/bin/cameratile.py ~/.local/bin/motionmonitor.py \
-      ~/.local/bin/styles.py ~/.local/bin/utils.py \
+      ~/.local/bin/cameratile.py ~/.local/bin/styles.py ~/.local/bin/utils.py \
       ~/.local/share/applications/tapitoCAM.desktop
 rm -rf ~/.config/tapitocam
 ```
