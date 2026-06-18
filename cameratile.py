@@ -215,3 +215,5 @@ class PTZController:
         self.ptz = None
         self.profile_token = None
         self._thread = None
+
+
