@@ -27,6 +27,11 @@ QPushButton:disabled {
     color: #666666;
     border-color: #2a2a2a;
 }
+QPushButton:checked {
+    background: #2563eb;
+    border-color: #3b82f6;
+    color: #ffffff;
+}
 QComboBox {
     border: 1px solid #3a3a3a;
     border-radius: 6px;

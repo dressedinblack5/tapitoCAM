@@ -16,6 +16,7 @@ locale.setlocale(locale.LC_NUMERIC, "C")
 import signal  # noqa: E402
 import subprocess  # noqa: E402
 import sys  # noqa: E402
+import threading  # noqa: E402
 
 from PySide6.QtCore import Qt, QTimer  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
@@ -72,18 +73,19 @@ class MainWindow(QMainWindow):
         # camera_id -> PTZController (synchronous, no threads)
         self._ptz_controllers: dict[int, PTZController] = {}
 
+        # cached current night mode per camera (None = unknown)
+        self._night_modes: dict[int, str] = {}
+
         # Motion detection
         self._motion_monitor = MotionMonitor(self)
         self._motion_monitor.motion_changed.connect(lambda v: self._on_alert_changed("motion", v))
-        self._motion_monitor.tamper_changed.connect(lambda v: self._on_alert_changed("tamper", v))
-        self._motion_monitor.intrusion_changed.connect(lambda v: self._on_alert_changed("intrusion", v))
         self._motion_monitor.error_occurred.connect(
             lambda msg: self.status_bar.showMessage(msg, 0)
         )
 
         self._current_camera_id: int | None = None
         self._updating_selector = False
-        self._alert_counts = {"motion": 0, "tamper": 0, "intrusion": 0}
+        self._alert_counts: dict[str, int] = {"motion": 0}
 
         self._init_ui()
         self._refresh_camera_list()
@@ -97,8 +99,7 @@ class MainWindow(QMainWindow):
 
     def _init_ui(self):
         self.setWindowTitle("tapitoCAM")
-        self.setMinimumSize(400, 630)
-        self.resize(400, 580)
+        self.setFixedSize(400, 670)
 
         central = QWidget()
         central.setObjectName("central_widget")
@@ -168,30 +169,15 @@ class MainWindow(QMainWindow):
         self._motion_count_label = QLabel("(0)")
         self._motion_count_label.setStyleSheet("color: #666666; padding: 2px 0; font-size: 12px;")
 
-        self._tamper_label = QLabel("⚫")
-        self._tamper_label.setStyleSheet("color: #555555; padding: 2px 0;")
-        self._tamper_count_label = QLabel("(0)")
-        self._tamper_count_label.setStyleSheet("color: #666666; padding: 2px 0; font-size: 12px;")
+        motion_row = QHBoxLayout()
+        motion_row.setSpacing(4)
+        motion_row.setContentsMargins(0, 0, 0, 0)
+        motion_row.addWidget(QLabel("Motion:"))
+        motion_row.addWidget(self._motion_label)
+        motion_row.addWidget(self._motion_count_label)
+        motion_row.addStretch()
 
-        self._intrusion_label = QLabel("⚫")
-        self._intrusion_label.setStyleSheet("color: #555555; padding: 2px 0;")
-        self._intrusion_count_label = QLabel("(0)")
-        self._intrusion_count_label.setStyleSheet("color: #666666; padding: 2px 0; font-size: 12px;")
-
-        alerts_row = QGridLayout()
-        alerts_row.setSpacing(4)
-        alerts_row.setContentsMargins(0, 0, 0, 0)
-        alerts_row.addWidget(QLabel("Motion:"), 0, 0)
-        alerts_row.addWidget(self._motion_label, 0, 1)
-        alerts_row.addWidget(self._motion_count_label, 0, 2)
-        alerts_row.addWidget(QLabel("Tamper:"), 1, 0)
-        alerts_row.addWidget(self._tamper_label, 1, 1)
-        alerts_row.addWidget(self._tamper_count_label, 1, 2)
-        alerts_row.addWidget(QLabel("Intrusion:"), 2, 0)
-        alerts_row.addWidget(self._intrusion_label, 2, 1)
-        alerts_row.addWidget(self._intrusion_count_label, 2, 2)
-
-        detail_grid.addRow("Alerts:", alerts_row)
+        detail_grid.addRow("Alerts:", motion_row)
         info_layout.addLayout(detail_grid)
 
         # Stream controls
@@ -335,6 +321,38 @@ class MainWindow(QMainWindow):
         preset_row.addStretch()
         info_layout.addLayout(preset_row)
 
+        # Camera controls (Night mode + LED)
+        ctrl_row = QHBoxLayout()
+        ctrl_row.setSpacing(6)
+        ctrl_row.setContentsMargins(0, 0, 0, 0)
+        ctrl_row.addStretch()
+        ctrl_row.addWidget(QLabel("Night:"))
+        self._night_auto_btn = QPushButton("Auto")
+        self._night_on_btn = QPushButton("IR")
+        self._night_off_btn = QPushButton("Light")
+        for b in (self._night_auto_btn, self._night_on_btn, self._night_off_btn):
+            b.setFixedHeight(28)
+            b.setCheckable(True)
+            b.setEnabled(False)
+        self._night_auto_btn.clicked.connect(lambda: self._set_night_mode("auto"))
+        self._night_on_btn.clicked.connect(lambda: self._set_night_mode("on"))
+        self._night_off_btn.clicked.connect(lambda: self._set_night_mode("off"))
+        ctrl_row.addWidget(self._night_auto_btn)
+        ctrl_row.addWidget(self._night_on_btn)
+        ctrl_row.addWidget(self._night_off_btn)
+        sep = QLabel("  │  ")
+        sep.setStyleSheet("color: #444444;")
+        ctrl_row.addWidget(sep)
+        ctrl_row.addWidget(QLabel("LED:"))
+        self._led_btn = QPushButton("LED")
+        self._led_btn.setFixedHeight(28)
+        self._led_btn.setCheckable(True)
+        self._led_btn.setEnabled(False)
+        self._led_btn.clicked.connect(self._toggle_led)
+        ctrl_row.addWidget(self._led_btn)
+        ctrl_row.addStretch()
+        info_layout.addLayout(ctrl_row)
+
         layout.addWidget(info_panel, stretch=1)
 
         # ---- Status bar ----
@@ -393,6 +411,9 @@ class MainWindow(QMainWindow):
             self._set_zoom_enabled(False)
             self._preset_combo.clear()
             self._preset_combo.addItem("— no presets —")
+            for b in (self._night_auto_btn, self._night_on_btn, self._night_off_btn):
+                b.setEnabled(False)
+            self._led_btn.setEnabled(False)
             return
 
         camera = self._cfg.get_camera(camera_id)
@@ -411,13 +432,15 @@ class MainWindow(QMainWindow):
 
         # Load alert counters from previous sessions
         self._motion_monitor.stop()
+        if camera_id in self._processes:
+            self._motion_monitor.start(
+                camera.get("ip", ""),
+                camera.get("username", ""),
+                camera.get("password", ""),
+            )
         self._load_alert_counts(camera)
         self._motion_label.setText("⚫")
         self._motion_label.setStyleSheet("color: #555555; padding: 2px 0;")
-        self._tamper_label.setText("⚫")
-        self._tamper_label.setStyleSheet("color: #555555; padding: 2px 0;")
-        self._intrusion_label.setText("⚫")
-        self._intrusion_label.setStyleSheet("color: #555555; padding: 2px 0;")
 
         # Reset preset selector until PTZ connects
         self._preset_combo.clear()
@@ -428,6 +451,14 @@ class MainWindow(QMainWindow):
         self._preset_del_btn.setEnabled(False)
 
         self._sync_ui()
+
+        # Enable pytapo controls
+        mode = self._night_modes.get(camera_id)
+        self._highlight_night_mode(mode)
+        for b in (self._night_auto_btn, self._night_on_btn, self._night_off_btn):
+            b.setEnabled(True)
+        self._led_btn.setEnabled(True)
+        self._led_btn.setChecked(False)
 
         # Connect PTZ for this camera (brief blocking ~1-3s for ONVIF init)
         self._connect_ptz(camera_id)
@@ -711,6 +742,158 @@ class MainWindow(QMainWindow):
 
         ctrl.connect_async(ip, user, password, on_connected)
 
+    # ------------------------------------------------------------------
+    # Night Mode  (pytapo — simple thread-per-click)
+    # ------------------------------------------------------------------
+
+    def _highlight_night_mode(self, mode: str | None):
+        """Set the checked button to match *mode* without triggering a set."""
+        self._night_auto_btn.setChecked(mode is None or mode == "auto")
+        self._night_on_btn.setChecked(mode == "on")
+        self._night_off_btn.setChecked(mode == "off")
+
+    def _set_night_mode(self, mode: str):
+        """Set night mode in a background thread, update buttons on completion."""
+        if self._current_camera_id is None:
+            return
+        camera = self._cfg.get_camera(self._current_camera_id)
+        if not camera:
+            return
+        ip = camera.get("ip", "")
+        user = camera.get("username", "")
+        password = camera.get("password", "")
+        if not ip or not user or not password:
+            self.status_bar.showMessage("Camera credentials missing", 3000)
+            return
+
+        # Optimistic highlight
+        self._highlight_night_mode(mode)
+        cid = self._current_camera_id
+
+        def _done(m: str):
+            self._night_modes[cid] = m
+            if self._current_camera_id == cid:
+                self._highlight_night_mode(m)
+            self.status_bar.showMessage(f"Night mode: {m}", 3000)
+
+        def _fail(err: str):
+            print(f"[NightMode] FAILED: {err}", file=sys.stderr)
+            self.status_bar.showMessage(f"Night mode failed: {err[:120]}", 8000)
+            if self._current_camera_id == cid:
+                self._highlight_night_mode(self._night_modes.get(cid))
+
+        def _run():
+            print(f"[NightMode] thread start mode={mode}", file=sys.stderr)
+            try:
+                from pytapo import Tapo
+            except Exception as e:
+                QTimer.singleShot(0, lambda: _fail(f"import pytapo: {e}"))
+                return
+            # Newer Tapo firmware requires admin + cloud password.
+            # Try all combos: camera account, admin+stored, admin+stored+cloudPassword
+            attempts = []
+            # 1. camera account credentials
+            attempts.append((user, password, ""))
+            # 2. admin + stored password (some firmwares)
+            if user.lower() != "admin":
+                attempts.append(("admin", password, ""))
+            # 3. admin + stored password as both password and cloudPassword
+            attempts.append(("admin", password, password))
+            last_err = ""
+            for u, p, cp in attempts:
+                try:
+                    client = Tapo(ip, u, p, cloudPassword=cp)
+                    print(f"[NightMode] Tapo({ip}) OK user={u}", file=sys.stderr)
+                    last_err = ""
+                    break
+                except Exception as e:
+                    last_err = str(e)
+                    print(f"[NightMode] Tapo({ip}) FAIL user={u}: {e}", file=sys.stderr)
+                    continue
+            if last_err:
+                hint = (
+                    " — set username to 'admin' and password to your"
+                    " Tapo app (cloud) account password, not the camera account"
+                    " password. Also enable 'Third Party Compatibility'"
+                    " in the Tapo app."
+                )
+                QTimer.singleShot(0, lambda: _fail(last_err + hint))
+                return
+            try:
+                client.setDayNightMode(mode)
+                print(f"[NightMode] setDayNightMode({mode}) OK", file=sys.stderr)
+                QTimer.singleShot(0, lambda: _done(mode))
+            except Exception as e:
+                print(f"[NightMode] setDayNightMode FAIL: {e}", file=sys.stderr)
+                QTimer.singleShot(0, lambda: _fail(f"setDayNightMode: {e}"))
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    # ------------------------------------------------------------------
+    # LED toggle
+    # ------------------------------------------------------------------
+
+    def _toggle_led(self):
+        """Toggle the camera's blue status LED."""
+        if self._current_camera_id is None:
+            return
+        camera = self._cfg.get_camera(self._current_camera_id)
+        if not camera:
+            return
+        ip = camera.get("ip", "")
+        user = camera.get("username", "")
+        password = camera.get("password", "")
+        if not ip or not user or not password:
+            return
+
+        enabled = self._led_btn.isChecked()
+        print(f"[LED] toggle {'on' if enabled else 'off'}", file=sys.stderr)
+
+        cid = self._current_camera_id
+
+        def _done():
+            self.status_bar.showMessage(
+                f"LED {'on' if enabled else 'off'}", 3000
+            )
+
+        def _fail(err: str):
+            print(f"[LED] FAILED: {err}", file=sys.stderr)
+            self._led_btn.setChecked(not enabled)  # revert
+            self.status_bar.showMessage(f"LED failed: {err[:80]}", 5000)
+
+        def _run():
+            try:
+                from pytapo import Tapo
+            except Exception as e:
+                QTimer.singleShot(0, lambda: _fail(f"import pytapo: {e}"))
+                return
+            # Same auth fallback chain as night mode
+            attempts = [(user, password, "")]
+            if user.lower() != "admin":
+                attempts.append(("admin", password, ""))
+            attempts.append(("admin", password, password))
+            client = None
+            for u, p, cp in attempts:
+                try:
+                    client = Tapo(ip, u, p, cloudPassword=cp)
+                    break
+                except Exception:
+                    continue
+            if client is None:
+                QTimer.singleShot(
+                    0, lambda: _fail("auth failed — use 'admin' + cloud password")
+                )
+                return
+            try:
+                client.setLEDEnabled(enabled)
+                print(f"[LED] setLEDEnabled({enabled}) OK", file=sys.stderr)
+                QTimer.singleShot(0, _done)
+            except Exception as e:
+                print(f"[LED] setLEDEnabled FAIL: {e}", file=sys.stderr)
+                QTimer.singleShot(0, lambda: _fail(str(e)))
+
+        threading.Thread(target=_run, daemon=True).start()
+
     def _set_pantilt_enabled(self, enabled: bool):
         """Enable/disable pan, tilt, stop, and preset action buttons."""
         for btn in (
@@ -854,15 +1037,11 @@ class MainWindow(QMainWindow):
 
     def _load_alert_counts(self, camera: dict):
         alerts = camera.get("alerts", {})
-        for atype in ("motion", "tamper", "intrusion"):
-            self._alert_counts[atype] = alerts.get(atype, 0)
-            label = getattr(self, f"_{atype}_count_label")
-            label.setText(f"({self._alert_counts[atype]})")
+        self._alert_counts["motion"] = alerts.get("motion", 0)
+        self._motion_count_label.setText(f"({self._alert_counts['motion']})")
 
     _ALERT_WIDGETS = {
         "motion": ("_motion_label", "_motion_count_label"),
-        "tamper": ("_tamper_label", "_tamper_count_label"),
-        "intrusion": ("_intrusion_label", "_intrusion_count_label"),
     }
 
     def _on_alert_changed(self, alert_type: str, is_active: bool):
@@ -916,6 +1095,7 @@ class MainWindow(QMainWindow):
         for ctrl in self._ptz_controllers.values():
             ctrl.cleanup()
         self._ptz_controllers.clear()
+        self._night_modes.clear()
         # Clean up any remaining playlist temp files
         for path in self._playlist_files.values():
             try:
