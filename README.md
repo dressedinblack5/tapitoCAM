@@ -19,7 +19,7 @@ See git history for full details.
 - Multi-camera support — any number of Tapo cameras
 - Standalone mpv streaming — one window per camera (Wayland-friendly)
 - Full PTZ — pan, tilt, zoom, presets via ONVIF
-- Motion, tamper, and intrusion detection — live ⚫/🔴 indicators via ONVIF PullPoint events
+- Motion detection — live ⚫/🔴 indicator via ONVIF PullPoint events
 - Alert counters persist across sessions per camera
 - HD / SD quality per camera
 - OS keyring password storage
@@ -47,6 +47,12 @@ Or run without installing: `./tapitocam_gui.py` (GUI) / `./tapitocam.sh` (CLI).
 
 Create a **Camera Account** in the Tapo app: gear → Advanced Settings → Camera Account.
 
+#### Authentication
+
+Newer Tapo firmware rejects camera account credentials for the management API
+(port 443). **Enable *Third Party Compatibility*** in the Tapo app:
+Tapo App → Me → Third‑Party Compatibility → On.
+
 ## Usage
 
 ### PTZ Controls
@@ -62,12 +68,43 @@ Create a **Camera Account** in the Tapo app: gear → Advanced Settings → Came
 
 Controls lock until streaming. PTZ connects async (1–3s), UI stays responsive.
 
-Motion, tamper, and intrusion detection use ONVIF PullPoint events on the event
-stream. Indicators show ⚫ (no event) / 🔴 (event active). Alert counters
+Motion detection uses ONVIF PullPoint events on the event
+stream. The indicator shows ⚫ (no motion) / 🔴 (motion detected). Alert counters
 persist per camera across sessions and are stored in the camera config.
 
 Presets are stored on the camera and cached locally. Each camera's presets
 are isolated. Saving a preset prompts for a name.
+
+### Camera Controls (pytapo)
+
+Night mode and LED indicator are controlled via the `pytapo` library.
+
+```
+Night: [Auto] [IR] [Light]  │  LED: [● On]
+```
+
+- **Night**: Auto (on‑demand), IR (always infrared), Light (white LED flood)
+- **LED**: Toggle the camera's blue status LED on/off
+
+Each tap runs in a background thread — the UI stays responsive, and if a
+command fails the button reverts to its previous state.
+
+#### Compatible Devices
+
+Users have reported pytapo working with these TP-Link Tapo cameras:
+
+| Series | Models |
+|--------|--------|
+| C Series | C100, C110, C120, C200, C201, C210, C211, C216, C220, C225, C236, C310, C320WS, C402, C403, C410, C420, C420S2, C425, C500, C510W, C520WS, C530WS, C710, C720 |
+| TC Series | TC55, TC60, TC70, TC72NL/EU, TC82, TC85 |
+| D Series (Doorbell) | D100C, D130, D205, D230, D235 |
+
+The library *should* work with any other Tapo camera exposing the HTTPS
+management API. If you have success with an unlisted model, please open
+an issue.
+
+> Note: Battery/solar‑powered devices may not expose ONVIF (motion events)
+> or RTSP, but pytapo management API (night mode, LED) should still work.
 
 ### CLI
 
