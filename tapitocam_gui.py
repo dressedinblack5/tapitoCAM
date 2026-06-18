@@ -40,7 +40,6 @@ from PySide6.QtWidgets import (  # noqa: E402
 from cameraconfig import ConfigManager  # noqa: E402
 from cameradialog import CameraManagerDialog  # noqa: E402
 from cameratile import PTZController  # noqa: E402
-from motionmonitor import MotionMonitor  # noqa: E402
 from styles import DARK_THEME  # noqa: E402
 from utils import (  # noqa: E402
     build_rtsp_url,
@@ -76,16 +75,8 @@ class MainWindow(QMainWindow):
         # cached current night mode per camera (None = unknown)
         self._night_modes: dict[int, str] = {}
 
-        # Motion detection
-        self._motion_monitor = MotionMonitor(self)
-        self._motion_monitor.motion_changed.connect(lambda v: self._on_alert_changed("motion", v))
-        self._motion_monitor.error_occurred.connect(
-            lambda msg: self.status_bar.showMessage(msg, 0)
-        )
-
         self._current_camera_id: int | None = None
         self._updating_selector = False
-        self._alert_counts: dict[str, int] = {"motion": 0}
 
         self._init_ui()
         self._refresh_camera_list()
@@ -163,21 +154,6 @@ class MainWindow(QMainWindow):
         self._status_label.setStyleSheet("color: #888888; padding: 2px 0;")
         detail_grid.addRow("IP:", self._ip_label)
         detail_grid.addRow("Status:", self._status_label)
-
-        self._motion_label = QLabel("⚫")
-        self._motion_label.setStyleSheet("color: #555555; padding: 2px 0;")
-        self._motion_count_label = QLabel("(0)")
-        self._motion_count_label.setStyleSheet("color: #666666; padding: 2px 0; font-size: 12px;")
-
-        motion_row = QHBoxLayout()
-        motion_row.setSpacing(4)
-        motion_row.setContentsMargins(0, 0, 0, 0)
-        motion_row.addWidget(QLabel("Motion:"))
-        motion_row.addWidget(self._motion_label)
-        motion_row.addWidget(self._motion_count_label)
-        motion_row.addStretch()
-
-        detail_grid.addRow("Alerts:", motion_row)
         info_layout.addLayout(detail_grid)
 
         # Stream controls
@@ -185,6 +161,7 @@ class MainWindow(QMainWindow):
         stream_row.setSpacing(8)
 
         self._stream_btn = QPushButton("▶ Open Stream")
+        self._stream_btn.setObjectName("stream_btn")
         self._stream_btn.setMinimumHeight(34)
         self._stream_btn.clicked.connect(self._toggle_stream)
         self._stream_btn.setEnabled(False)
@@ -430,18 +407,6 @@ class MainWindow(QMainWindow):
         self._stream_btn.setEnabled(True)
         self._quality_combo.setEnabled(True)
 
-        # Load alert counters from previous sessions
-        self._motion_monitor.stop()
-        if camera_id in self._processes:
-            self._motion_monitor.start(
-                camera.get("ip", ""),
-                camera.get("username", ""),
-                camera.get("password", ""),
-            )
-        self._load_alert_counts(camera)
-        self._motion_label.setText("⚫")
-        self._motion_label.setStyleSheet("color: #555555; padding: 2px 0;")
-
         # Reset preset selector until PTZ connects
         self._preset_combo.clear()
         self._preset_combo.addItem("— no presets —")
@@ -602,9 +567,6 @@ class MainWindow(QMainWindow):
             self._processes[camera_id] = proc
             self._playlist_files[camera_id] = playlist_path
             self.status_bar.showMessage(f"Started: {title}", 3000)
-
-            # Start motion detection for this camera
-            self._motion_monitor.start(ip, username, password)
         except FileNotFoundError:
             os.unlink(playlist_path)
             QMessageBox.critical(
@@ -656,7 +618,6 @@ class MainWindow(QMainWindow):
             if camera
             else f"Camera {camera_id}"
         )
-        self._motion_monitor.stop()
         self.status_bar.showMessage(f"Stopped: {name}", 3000)
         self._sync_ui()
 
@@ -1027,36 +988,7 @@ class MainWindow(QMainWindow):
         else:
             self.status_bar.showMessage("Failed to delete preset", 2000)
 
-    def _save_alert_counts(self):
-        if self._current_camera_id is None:
-            return
-        self._cfg.update_camera(
-            self._current_camera_id,
-            {"alerts": dict(self._alert_counts)},
-        )
 
-    def _load_alert_counts(self, camera: dict):
-        alerts = camera.get("alerts", {})
-        self._alert_counts["motion"] = alerts.get("motion", 0)
-        self._motion_count_label.setText(f"({self._alert_counts['motion']})")
-
-    _ALERT_WIDGETS = {
-        "motion": ("_motion_label", "_motion_count_label"),
-    }
-
-    def _on_alert_changed(self, alert_type: str, is_active: bool):
-        if self._current_camera_id is None:
-            return
-        label_name, count_label_name = self._ALERT_WIDGETS[alert_type]
-        label = getattr(self, label_name)
-        count_label = getattr(self, count_label_name)
-        if is_active:
-            self._alert_counts[alert_type] += 1
-            self._save_alert_counts()
-        label.setText("🔴" if is_active else "⚫")
-        count_label.setText(f"({self._alert_counts[alert_type]})")
-        color = "#ef4444" if is_active else "#555555"
-        label.setStyleSheet(f"color: {color}; padding: 2px 0;")
 
     # ------------------------------------------------------------------
     # Actions
@@ -1090,7 +1022,6 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         self._refresh_timer.stop()
-        self._motion_monitor.stop()
         self._stop_all()
         for ctrl in self._ptz_controllers.values():
             ctrl.cleanup()
