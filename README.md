@@ -2,15 +2,18 @@
 
 TP-Link Tapo Camera RTSP Client for Linux — multi-camera control center.
 
+[![CI](https://github.com/dressedinblack5/tapitoCAM/actions/workflows/ci.yml/badge.svg)](https://github.com/dressedinblack5/tapitoCAM/actions)
+
 ![GUI Preview](assets/gui-preview.png)
 ![Tapo Camera Preview](assets/tc-preview.png)
 
 ## Recent Changes
 
-- **Major refactoring**: Simplified camera configuration with improved IP validation using `ipaddress` module
-- **Migration cleanup**: Removed legacy `.tapitocam.env` file migration code
-- **Code cleanup**: Streamlined validation and password handling
-- **Test updates**: Refactored test files to match new implementation
+- **Tokyo Night Storm theme**: Fresh dark UI palette — cooler tones, higher contrast
+- **Flatter layout**: Removed nested card, cleaned up PTZ centering, removed pipe separators
+- **CI pipeline**: Lint (ruff) + test matrix (Python 3.10–3.12) via GitHub Actions
+- **Bug fixes**: LED toggle crash on auth failure, scan thread signal emission after dialog close
+- **Code cleanup**: `try/except: pass` → `contextlib.suppress` throughout
 
 See git history for full details.
 
