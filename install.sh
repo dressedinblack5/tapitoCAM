@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO_URL="https://github.com/dressedinblack5/tapitoCAM"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-}")" && pwd 2>/dev/null || pwd)"
 
 # ── Self-bootstrap: download repo if running via curl | bash ──
 if [[ ! -f "$SCRIPT_DIR/tapitocam_gui.py" ]]; then
