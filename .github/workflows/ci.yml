@@ -30,7 +30,7 @@ jobs:
       - name: Install system deps (Qt)
         run: |
           sudo apt-get update -o Acquire::Retries=3
-          sudo apt-get install -y libgl1-mesa-glx libegl1 libxkbcommon0
+          sudo apt-get install -y libgl1 libegl1 libxkbcommon0
       - name: Install Python deps
         run: |
           python -m pip install --upgrade pip
