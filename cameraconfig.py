@@ -2,6 +2,7 @@
 """Configuration manager for multi-camera setup. Pure Python, no Qt."""
 
 import base64
+import contextlib
 import ipaddress
 import json
 import os
@@ -58,12 +59,10 @@ class ConfigManager:
         """Store password in OS keyring. No-op if keyring is unavailable."""
         if self._keyring is None:
             return
-        try:
+        with contextlib.suppress(Exception):
             self._keyring.set_password(
                 KEYRING_SERVICE, f"camera_{camera_id}", password
             )
-        except Exception:
-            pass  # keyring unavailable (e.g. headless, no DBus)
 
     def _keyring_get(self, camera_id: int) -> str | None:
         """Retrieve password from OS keyring. Returns None on any failure."""
@@ -80,12 +79,10 @@ class ConfigManager:
         """Remove password from OS keyring. No-op if keyring is unavailable."""
         if self._keyring is None:
             return
-        try:
+        with contextlib.suppress(Exception):
             self._keyring.delete_password(
                 KEYRING_SERVICE, f"camera_{camera_id}"
             )
-        except Exception:
-            pass
 
     # ------------------------------------------------------------------
     # I/O
@@ -118,10 +115,8 @@ class ConfigManager:
                 # Decode the stored base64 password (backward compatible)
                 encoded = cam.get("password", "")
                 if encoded:
-                    try:
+                    with contextlib.suppress(Exception):
                         cam["password"] = base64.b64decode(encoded).decode()
-                    except Exception:
-                        pass  # leave as-is if not valid base64
                 # Migrate existing password into keyring for next time
                 if self._keyring and cam.get("password"):
                     self._keyring_store(cid, cam["password"])

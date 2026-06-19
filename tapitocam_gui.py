@@ -7,6 +7,7 @@ stopping streams.
 """
 
 import atexit
+import contextlib
 import locale
 import os
 
@@ -21,8 +22,8 @@ import threading  # noqa: E402
 from PySide6.QtCore import Qt, QTimer  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QApplication,
+    QButtonGroup,
     QComboBox,
-    QDialog,
     QFormLayout,
     QGridLayout,
     QHBoxLayout,
@@ -49,7 +50,6 @@ from utils import (  # noqa: E402
     sanitize_onvif_error,
     write_rtsp_playlist,
 )
-
 
 # ===========================================================================
 # Main Window
@@ -90,7 +90,7 @@ class MainWindow(QMainWindow):
 
     def _init_ui(self):
         self.setWindowTitle("tapitoCAM")
-        self.setFixedSize(400, 670)
+        self.setFixedSize(420, 620)
 
         central = QWidget()
         central.setObjectName("central_widget")
@@ -128,33 +128,24 @@ class MainWindow(QMainWindow):
         selector_row.addWidget(self._camera_combo, stretch=1)
         layout.addLayout(selector_row)
 
-        # ---- Camera info panel ----
-        info_panel = QWidget()
-        info_panel.setObjectName("info_panel")
-        info_panel.setStyleSheet(
-            "QWidget#info_panel { background: #1a1a1a; border: 1px solid #333333;"
-            " border-radius: 8px; }"
-        )
-        info_layout = QVBoxLayout(info_panel)
-        info_layout.setSpacing(8)
-        info_layout.setContentsMargins(12, 12, 12, 12)
+        # ---- Camera controls ----
+        controls_layout = QVBoxLayout()
+        controls_layout.setSpacing(8)
 
         # Camera details
         self._name_label = QLabel("No camera selected")
-        self._name_label.setStyleSheet(
-            "font-size: 15px; font-weight: bold; color: #e0e0e0;"
-        )
-        info_layout.addWidget(self._name_label)
+        self._name_label.setStyleSheet("font-size: 16px; font-weight: bold;")
+        controls_layout.addWidget(self._name_label)
 
         detail_grid = QFormLayout()
         detail_grid.setSpacing(4)
         self._ip_label = QLabel("—")
-        self._ip_label.setStyleSheet("color: #aaaaaa;")
+        self._ip_label.setObjectName("secondary")
         self._status_label = QLabel("● —")
-        self._status_label.setStyleSheet("color: #888888; padding: 2px 0;")
+        self._status_label.setObjectName("secondary")
         detail_grid.addRow("IP:", self._ip_label)
         detail_grid.addRow("Status:", self._status_label)
-        info_layout.addLayout(detail_grid)
+        controls_layout.addLayout(detail_grid)
 
         # Stream controls
         stream_row = QHBoxLayout()
@@ -173,7 +164,7 @@ class MainWindow(QMainWindow):
         stream_row.addWidget(self._quality_combo)
 
         stream_row.addStretch()
-        info_layout.addLayout(stream_row)
+        controls_layout.addLayout(stream_row)
 
         # PTZ controls
         ptz_container = QVBoxLayout()
@@ -256,11 +247,7 @@ class MainWindow(QMainWindow):
         ptz_container.addLayout(pad_row)
         ptz_container.addLayout(zoom_row)
 
-        wrapper_row = QHBoxLayout()
-        wrapper_row.addStretch()
-        wrapper_row.addLayout(ptz_container)
-        wrapper_row.addStretch()
-        info_layout.addLayout(wrapper_row)
+        controls_layout.addLayout(ptz_container)
 
         # Preset controls
         preset_row = QHBoxLayout()
@@ -296,11 +283,11 @@ class MainWindow(QMainWindow):
         self._preset_del_btn.clicked.connect(self._ptz_preset_delete)
         preset_row.addWidget(self._preset_del_btn)
         preset_row.addStretch()
-        info_layout.addLayout(preset_row)
+        controls_layout.addLayout(preset_row)
 
         # Camera controls (Night mode + LED)
         ctrl_row = QHBoxLayout()
-        ctrl_row.setSpacing(6)
+        ctrl_row.setSpacing(8)
         ctrl_row.setContentsMargins(0, 0, 0, 0)
         ctrl_row.addStretch()
         ctrl_row.addWidget(QLabel("Night:"))
@@ -311,15 +298,18 @@ class MainWindow(QMainWindow):
             b.setFixedHeight(28)
             b.setCheckable(True)
             b.setEnabled(False)
+        self._night_group = QButtonGroup(self)
+        self._night_group.setExclusive(True)
+        self._night_group.addButton(self._night_auto_btn)
+        self._night_group.addButton(self._night_on_btn)
+        self._night_group.addButton(self._night_off_btn)
         self._night_auto_btn.clicked.connect(lambda: self._set_night_mode("auto"))
         self._night_on_btn.clicked.connect(lambda: self._set_night_mode("on"))
         self._night_off_btn.clicked.connect(lambda: self._set_night_mode("off"))
         ctrl_row.addWidget(self._night_auto_btn)
         ctrl_row.addWidget(self._night_on_btn)
         ctrl_row.addWidget(self._night_off_btn)
-        sep = QLabel("  │  ")
-        sep.setStyleSheet("color: #444444;")
-        ctrl_row.addWidget(sep)
+        ctrl_row.addSpacing(12)
         ctrl_row.addWidget(QLabel("LED:"))
         self._led_btn = QPushButton("LED")
         self._led_btn.setFixedHeight(28)
@@ -328,9 +318,9 @@ class MainWindow(QMainWindow):
         self._led_btn.clicked.connect(self._toggle_led)
         ctrl_row.addWidget(self._led_btn)
         ctrl_row.addStretch()
-        info_layout.addLayout(ctrl_row)
+        controls_layout.addLayout(ctrl_row)
 
-        layout.addWidget(info_panel, stretch=1)
+        layout.addLayout(controls_layout, stretch=1)
 
         # ---- Status bar ----
         self.status_bar = QStatusBar()
@@ -444,12 +434,12 @@ class MainWindow(QMainWindow):
 
         if is_streaming:
             self._status_label.setText("● Streaming")
-            self._status_label.setStyleSheet(
-                "color: #22c55e; padding: 2px 0; font-weight: bold;"
-            )
+            self._status_label.setProperty("streaming", True)
         else:
             self._status_label.setText("● Ready")
-            self._status_label.setStyleSheet("color: #888888; padding: 2px 0;")
+            self._status_label.setProperty("streaming", False)
+        self._status_label.style().unpolish(self._status_label)
+        self._status_label.style().polish(self._status_label)
 
         # Update Start All / Stop All button states
         cameras = self._cfg.load()
@@ -503,10 +493,8 @@ class MainWindow(QMainWindow):
             self._processes.pop(cid, None)
             playlist = self._playlist_files.pop(cid, None)
             if playlist:
-                try:
+                with contextlib.suppress(OSError):
                     os.unlink(playlist)
-                except OSError:
-                    pass
             camera = self._cfg.get_camera(cid)
             name = camera.get("name", f"Camera {cid}") if camera else f"Camera {cid}"
             if rc != 0:
@@ -595,10 +583,8 @@ class MainWindow(QMainWindow):
 
         # Clean up the temp playlist file (prevents credential leakage on disk)
         if playlist:
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(playlist)
-            except OSError:
-                pass
 
         if proc is None:
             return
@@ -607,10 +593,8 @@ class MainWindow(QMainWindow):
             os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
             proc.wait(timeout=3)
         except Exception:
-            try:
+            with contextlib.suppress(Exception):
                 proc.kill()
-            except Exception:
-                pass
 
         camera = self._cfg.get_camera(camera_id)
         name = (
@@ -674,10 +658,10 @@ class MainWindow(QMainWindow):
             return
 
         self.status_bar.showMessage("Connecting PTZ...", 2000)
+        name = camera.get("name", f"Camera {camera_id}")
 
         # Create new controller if not exists
         if camera_id not in self._ptz_controllers:
-            name = camera.get("name", f"Camera {camera_id}")
             self._ptz_controllers[camera_id] = PTZController(
                 on_error=lambda msg: self.status_bar.showMessage(
                     f"PTZ error ({name}): {msg}", 0
@@ -748,7 +732,8 @@ class MainWindow(QMainWindow):
             try:
                 from pytapo import Tapo
             except Exception as e:
-                QTimer.singleShot(0, lambda: _fail(f"import pytapo: {e}"))
+                err_msg = f"import pytapo: {e}"
+                QTimer.singleShot(0, lambda: _fail(err_msg))
                 return
             # Newer Tapo firmware requires admin + cloud password.
             # Try all combos: camera account, admin+stored, admin+stored+cloudPassword
@@ -785,8 +770,9 @@ class MainWindow(QMainWindow):
                 print(f"[NightMode] setDayNightMode({mode}) OK", file=sys.stderr)
                 QTimer.singleShot(0, lambda: _done(mode))
             except Exception as e:
+                err_msg = f"setDayNightMode: {e}"
                 print(f"[NightMode] setDayNightMode FAIL: {e}", file=sys.stderr)
-                QTimer.singleShot(0, lambda: _fail(f"setDayNightMode: {e}"))
+                QTimer.singleShot(0, lambda: _fail(err_msg))
 
         threading.Thread(target=_run, daemon=True).start()
 
@@ -810,8 +796,6 @@ class MainWindow(QMainWindow):
         enabled = self._led_btn.isChecked()
         print(f"[LED] toggle {'on' if enabled else 'off'}", file=sys.stderr)
 
-        cid = self._current_camera_id
-
         def _done():
             self.status_bar.showMessage(
                 f"LED {'on' if enabled else 'off'}", 3000
@@ -823,10 +807,12 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage(f"LED failed: {err[:80]}", 5000)
 
         def _run():
+
             try:
                 from pytapo import Tapo
             except Exception as e:
-                QTimer.singleShot(0, lambda: _fail(f"import pytapo: {e}"))
+                err_msg = f"import pytapo: {e}"
+                QTimer.singleShot(0, lambda: _fail(err_msg))
                 return
             # Same auth fallback chain as night mode
             attempts = [(user, password, "")]
@@ -850,8 +836,9 @@ class MainWindow(QMainWindow):
                 print(f"[LED] setLEDEnabled({enabled}) OK", file=sys.stderr)
                 QTimer.singleShot(0, _done)
             except Exception as e:
+                err_msg = str(e)
                 print(f"[LED] setLEDEnabled FAIL: {e}", file=sys.stderr)
-                QTimer.singleShot(0, lambda: _fail(str(e)))
+                QTimer.singleShot(0, lambda: _fail(err_msg))
 
         threading.Thread(target=_run, daemon=True).start()
 
@@ -1029,13 +1016,10 @@ class MainWindow(QMainWindow):
         self._night_modes.clear()
         # Clean up any remaining playlist temp files
         for path in self._playlist_files.values():
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(path)
-            except OSError:
-                pass
         self._playlist_files.clear()
         super().closeEvent(event)
-
 
 # ===========================================================================
 # Cleanup — kill orphaned mpv processes on crash
@@ -1047,23 +1031,17 @@ _playlist_registry: dict[int, str] = {}
 
 def _kill_all_processes():
     """Kill all tracked mpv processes and clean up playlist temp files."""
-    for cid, proc in list(_process_registry.items()):
+    for _cid, proc in list(_process_registry.items()):
         try:
             os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
             proc.wait(timeout=2)
         except Exception:
-            try:
+            with contextlib.suppress(Exception):
                 proc.kill()
-            except Exception:
-                pass
     _process_registry.clear()
     for path in _playlist_registry.values():
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(path)
-        except OSError:
-            pass
-    _playlist_registry.clear()
-
 
 atexit.register(_kill_all_processes)
 signal.signal(signal.SIGTERM, lambda *_: _kill_all_processes())

@@ -124,19 +124,16 @@ class TestPTZController(unittest.TestCase):
 
     # --- async connect ---
 
-    @patch("cameratile.QTimer")
     @patch("cameratile.threading.Thread")
-    def test_connect_async_starts_thread(self, mock_thread, mock_timer):
+    def test_connect_async_starts_thread(self, mock_thread):
         mock_thread_instance = MagicMock()
         mock_thread.return_value = mock_thread_instance
         callback = MagicMock()
         self.ctrl.connect_async("10.0.0.1", "user", "pass", callback)
         mock_thread.assert_called_once()
         mock_thread_instance.start.assert_called_once()
-
-    @patch("cameratile.QTimer")
     @patch("cameratile.ONVIFCamera")
-    def test_connect_async_uses_media_profile_token(self, mock_cam_class, mock_timer):
+    def test_connect_async_uses_media_profile_token(self, mock_cam_class):
         """connect_async gets the token from GetProfiles, not GetConfigurations."""
         mock_media = MagicMock()
         mock_profile = MagicMock()
@@ -159,9 +156,8 @@ class TestPTZController(unittest.TestCase):
         self.assertEqual(self.ctrl.profile_token, "media-token-123")
         self.assertEqual(self.ctrl.ptz, mock_ptz)
 
-    @patch("cameratile.QTimer")
     @patch("cameratile.ONVIFCamera")
-    def test_connect_async_falls_back_to_ptz_config_token(self, mock_cam_class, mock_timer):
+    def test_connect_async_falls_back_to_ptz_config_token(self, mock_cam_class):
         """When GetProfiles returns empty, fall back to GetConfigurations token."""
         mock_media = MagicMock()
         mock_media.GetProfiles.return_value = []

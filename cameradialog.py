@@ -24,7 +24,6 @@ from PySide6.QtWidgets import (
 from cameraconfig import ConfigManager
 from styles import DARK_THEME
 
-
 # ===========================================================================
 # Camera edit sub-dialog
 # ===========================================================================
@@ -47,7 +46,7 @@ class _CameraEditDialog(QDialog):
     def _build_ui(self):
         title = "Edit Camera" if self._camera else "Add Camera"
         self.setWindowTitle(title)
-        self.setFixedSize(380, 320)
+        self.setFixedSize(420, 320)
 
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
@@ -148,6 +147,7 @@ class _NetworkScanDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._selected_ip: str | None = None
+        self._scan_active = True
         self._build_ui()
         self._apply_stylesheet()
         self._device_found.connect(self._add_result)
@@ -157,7 +157,7 @@ class _NetworkScanDialog(QDialog):
 
     def _build_ui(self):
         self.setWindowTitle("Scan Network")
-        self.setFixedSize(400, 350)
+        self.setFixedSize(420, 350)
 
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
@@ -198,25 +198,33 @@ class _NetworkScanDialog(QDialog):
 
         def scan():
             def probe(i):
+                if not self._scan_active:
+                    return None
                 ip = f"{subnet}.{i}"
                 try:
                     with socket.create_connection((ip, 554), timeout=0.3):
-                        self._device_found.emit(ip)
+                        if self._scan_active:
+                            self._device_found.emit(ip)
                 except Exception:
                     pass
                 return ip
 
             with concurrent.futures.ThreadPoolExecutor(max_workers=25) as pool:
                 futures = [pool.submit(probe, i) for i in range(1, 255)]
-                done = 0
-                for f in concurrent.futures.as_completed(futures):
-                    done += 1
+                for done, _f in enumerate(concurrent.futures.as_completed(futures), 1):
+                    if not self._scan_active:
+                        break
                     if done % 10 == 0 or done == 254:
                         self._progress_update.emit(done)
 
-            self._scan_finished.emit()
+            if self._scan_active:
+                self._scan_finished.emit()
 
         threading.Thread(target=scan, daemon=True).start()
+
+    def done(self, result):
+        self._scan_active = False
+        super().done(result)
 
     def _add_result(self, ip: str):
         item = QListWidgetItem(ip)
