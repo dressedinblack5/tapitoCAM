@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (  # noqa: E402
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QStatusBar,
     QStyle,
     QVBoxLayout,
@@ -90,7 +91,8 @@ class MainWindow(QMainWindow):
 
     def _init_ui(self):
         self.setWindowTitle("tapitoCAM")
-        self.setFixedSize(420, 620)
+        self.setMinimumSize(420, 620)
+        self.resize(420, 620)
 
         central = QWidget()
         central.setObjectName("central_widget")
@@ -150,6 +152,8 @@ class MainWindow(QMainWindow):
         # Stream controls
         stream_row = QHBoxLayout()
         stream_row.setSpacing(8)
+        stream_row.setContentsMargins(0, 0, 0, 0)
+        stream_row.addStretch()
 
         self._stream_btn = QPushButton("▶ Open Stream")
         self._stream_btn.setObjectName("stream_btn")
@@ -256,7 +260,7 @@ class MainWindow(QMainWindow):
         self._preset_combo = QComboBox()
         self._preset_combo.setMinimumWidth(140)
         self._preset_combo.setEnabled(False)
-        self._preset_combo.addItem("— no presets —")
+        self._preset_combo.addItem("No presets saved")
         preset_row.addWidget(self._preset_combo)
         self._preset_go_btn = QPushButton()
         self._preset_go_btn.setIcon(
@@ -320,7 +324,13 @@ class MainWindow(QMainWindow):
         ctrl_row.addStretch()
         controls_layout.addLayout(ctrl_row)
 
-        layout.addLayout(controls_layout, stretch=1)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll_widget = QWidget()
+        scroll_widget.setLayout(controls_layout)
+        scroll.setWidget(scroll_widget)
+        layout.addWidget(scroll, stretch=1)
 
         # ---- Status bar ----
         self.status_bar = QStatusBar()
@@ -347,8 +357,10 @@ class MainWindow(QMainWindow):
             self._camera_combo.addItem("— No cameras configured —", None)
         else:
             for cam in cameras:
-                label = f"{cam.get('name', '?')}  —  {cam.get('ip', '?.?.?.?')}"
-                self._camera_combo.addItem(label, cam.get("id"))
+                cid = cam.get("id")
+                dot = "● " if cid in self._processes else ""
+                label = f"{dot}{cam.get('name', '?')}  —  {cam.get('ip', '?.?.?.?')}"
+                self._camera_combo.addItem(label, cid)
 
         self._camera_combo.blockSignals(False)
         self._updating_selector = False
@@ -377,7 +389,7 @@ class MainWindow(QMainWindow):
             self._set_pantilt_enabled(False)
             self._set_zoom_enabled(False)
             self._preset_combo.clear()
-            self._preset_combo.addItem("— no presets —")
+            self._preset_combo.addItem("No presets saved")
             for b in (self._night_auto_btn, self._night_on_btn, self._night_off_btn):
                 b.setEnabled(False)
             self._led_btn.setEnabled(False)
@@ -399,7 +411,7 @@ class MainWindow(QMainWindow):
 
         # Reset preset selector until PTZ connects
         self._preset_combo.clear()
-        self._preset_combo.addItem("— no presets —")
+        self._preset_combo.addItem("No presets saved")
         self._preset_combo.setEnabled(False)
         self._preset_save_btn.setEnabled(False)
         self._preset_go_btn.setEnabled(False)
@@ -418,12 +430,26 @@ class MainWindow(QMainWindow):
         # Connect PTZ for this camera (brief blocking ~1-3s for ONVIF init)
         self._connect_ptz(camera_id)
 
+    def _update_combo_streaming_indicators(self):
+        """Prefix combo items with ● for cameras currently streaming."""
+        for i in range(self._camera_combo.count()):
+            cam_id = self._camera_combo.itemData(i)
+            text = self._camera_combo.itemText(i)
+            base = text.removeprefix("● ")
+            if cam_id is not None and cam_id in self._processes:
+                if not text.startswith("● "):
+                    self._camera_combo.setItemText(i, f"● {base}")
+            else:
+                if text.startswith("● "):
+                    self._camera_combo.setItemText(i, base)
+
     def _sync_ui(self):
         """Update the stream button and status label to reflect reality.
 
         Also prunes any mpv processes that have exited (connection errors).
         """
         self._prune_dead_processes()
+        self._update_combo_streaming_indicators()
 
         cam_id = self._current_camera_id
         if cam_id is None:
@@ -618,10 +644,19 @@ class MainWindow(QMainWindow):
 
     def _stop_all(self):
         count = len(self._processes)
+        if count == 0:
+            return
+        reply = QMessageBox.question(
+            self,
+            "Stop All Streams",
+            f"Stop {count} stream(s)?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
         for cid in list(self._processes.keys()):
             self._stop_camera(cid)
-        if count:
-            self.status_bar.showMessage(f"Stopped {count} camera(s)", 3000)
+        self.status_bar.showMessage(f"Stopped {count} camera(s)", 3000)
 
     # ------------------------------------------------------------------
     # PTZ  (synchronous — no threads, UI-safe)
@@ -635,7 +670,7 @@ class MainWindow(QMainWindow):
         is_streaming = camera_id in self._processes
         self._set_pantilt_enabled(is_streaming)
         self._set_zoom_enabled(is_streaming and ctrl.has_zoom)
-        if self._preset_combo.count() == 1 and self._preset_combo.itemText(0) == "— no presets —":
+        if self._preset_combo.count() == 1 and self._preset_combo.itemText(0) == "No presets saved":
             self._ptz_preset_refresh(camera_id)
 
     def _connect_ptz(self, camera_id: int):
@@ -678,7 +713,7 @@ class MainWindow(QMainWindow):
                 self._set_pantilt_enabled(False)
                 self._set_zoom_enabled(False)
                 self._preset_combo.clear()
-                self._preset_combo.addItem("— no presets —")
+                self._preset_combo.addItem("No presets saved")
                 if is_auth_error(error):
                     msg = f"PTZ auth failed: {name} — check camera credentials"
                 else:
@@ -844,6 +879,7 @@ class MainWindow(QMainWindow):
 
     def _set_pantilt_enabled(self, enabled: bool):
         """Enable/disable pan, tilt, stop, and preset action buttons."""
+        tip = "" if enabled else "Start streaming to enable PTZ"
         for btn in (
             self._ptz_up,
             self._ptz_down,
@@ -852,18 +888,25 @@ class MainWindow(QMainWindow):
             self._ptz_stop_btn,
         ):
             btn.setEnabled(enabled)
+            btn.setToolTip(tip)
         self._preset_save_btn.setEnabled(enabled)
+        self._preset_save_btn.setToolTip(tip)
         self._preset_go_btn.setEnabled(
             enabled and self._preset_combo.currentData() is not None
         )
+        self._preset_go_btn.setToolTip(tip)
         self._preset_del_btn.setEnabled(
             enabled and self._preset_combo.currentData() is not None
         )
+        self._preset_del_btn.setToolTip(tip)
 
     def _set_zoom_enabled(self, enabled: bool):
         """Enable/disable zoom buttons independently of pan/tilt."""
+        tip = "" if enabled else "Start streaming to enable PTZ"
         self._ptz_zoom_in.setEnabled(enabled)
+        self._ptz_zoom_in.setToolTip(tip)
         self._ptz_zoom_out.setEnabled(enabled)
+        self._ptz_zoom_out.setToolTip(tip)
 
     def _ptz_move(self, pan: float, tilt: float):
         if self._current_camera_id is None:
@@ -920,7 +963,7 @@ class MainWindow(QMainWindow):
             for p in camera["presets"]:
                 self._preset_combo.addItem(p["name"], p["token"])
         else:
-            self._preset_combo.addItem("— no presets —")
+            self._preset_combo.addItem("No presets saved")
         self._preset_combo.blockSignals(False)
         self._preset_combo.setEnabled(True)
         self._preset_go_btn.setEnabled(

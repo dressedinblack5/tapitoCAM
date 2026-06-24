@@ -97,12 +97,12 @@ QLabel {{
 QLabel#secondary {{
     color: {_SUBTEXT};
 }}
-QLabel[streaming="true"] {{
+QLabel#secondary[streaming="true"] {{
     color: {_GREEN};
     padding: 2px 0;
     font-weight: bold;
 }}
-QLabel[streaming="false"] {{
+QLabel#secondary[streaming="false"] {{
     color: {_SUBTEXT};
     padding: 2px 0;
 }}
