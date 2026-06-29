@@ -99,8 +99,11 @@ setup_config() {
     if [[ "$ans" =~ $re_yes ]]; then
         # Write via Python helper (or directly if Python not available)
         if [[ -f "$PYTHON_HELPER" ]]; then
+            # pass via env to avoid shell-injection through user input
+            TAPO_NAME="$TAPO_NAME" TAPO_USER="$TAPO_USER" TAPO_PASS="$TAPO_PASS" \
+            TAPO_IP="$TAPO_IP" TAPO_QUALITY="$TAPO_QUALITY" \
             python3 -c "
-import json, sys
+import json, os
 from pathlib import Path
 p = Path.home() / '.config' / 'tapitocam' / 'cameras.json'
 p.parent.mkdir(parents=True, exist_ok=True)
@@ -113,11 +116,11 @@ cameras = data.get('cameras', [])
 new_id = max((c['id'] for c in cameras), default=-1) + 1
 cameras.append({
     'id': new_id,
-    'name': '${TAPO_NAME:-Camera $new_id}',
-    'username': '$TAPO_USER',
-    'password': '$TAPO_PASS',
-    'ip': '$TAPO_IP',
-    'quality': '$TAPO_QUALITY',
+    'name': os.environ.get('TAPO_NAME', '') or f'Camera {new_id}',
+    'username': os.environ['TAPO_USER'],
+    'password': os.environ['TAPO_PASS'],
+    'ip': os.environ['TAPO_IP'],
+    'quality': os.environ.get('TAPO_QUALITY', 'hd'),
 })
 data['cameras'] = cameras
 with open(p, 'w') as f:
