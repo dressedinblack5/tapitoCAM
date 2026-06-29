@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Per-camera ONVIF PTZ controller — async connection, direct PTZ commands."""
 
 from __future__ import annotations

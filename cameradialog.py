@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Camera manager dialog — add, edit, and remove cameras from the config."""
 
 import concurrent.futures

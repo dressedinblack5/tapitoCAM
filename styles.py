@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Tokyo Night Storm theme for tapitoCAM."""
 
 _BG = "#24283b"

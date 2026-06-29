@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Configuration manager for multi-camera setup. Pure Python, no Qt."""
 
 import base64
