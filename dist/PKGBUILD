@@ -24,7 +24,7 @@ source=(
   "cameradialog.py"
   "styles.py"
   "utils.py"
-  "tapitoCAM.desktop"
+  "tapitocam.desktop"
 )
 sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP')
 
@@ -43,7 +43,7 @@ package() {
 
   # Desktop entry
   sed 's|Exec=.*|Exec=/usr/bin/tapitocam-gui|' \
-    "$srcdir/tapitoCAM.desktop" \
+    "$srcdir/tapitocam.desktop" \
     > "$pkgdir/usr/share/applications/tapitoCAM.desktop"
   chmod 644 "$pkgdir/usr/share/applications/tapitoCAM.desktop"
 
