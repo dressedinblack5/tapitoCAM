@@ -71,9 +71,7 @@ class TestPTZController(unittest.TestCase):
 
         with patch("sys.stderr") as mock_stderr:
             self.ctrl.continuous_move(0.3, 0.0)
-            written = "".join(
-                c.args[0] for c in mock_stderr.write.call_args_list
-            )
+            written = "".join(c.args[0] for c in mock_stderr.write.call_args_list)
             self.assertIn("[PTZ]", written)
             self.assertIn("boom", written)
 
@@ -110,9 +108,7 @@ class TestPTZController(unittest.TestCase):
 
         with patch("sys.stderr") as mock_stderr:
             self.ctrl.stop()
-            written = "".join(
-                c.args[0] for c in mock_stderr.write.call_args_list
-            )
+            written = "".join(c.args[0] for c in mock_stderr.write.call_args_list)
             self.assertIn("[PTZ]", written)
             self.assertIn("stop-boom", written)
 
@@ -132,6 +128,7 @@ class TestPTZController(unittest.TestCase):
         self.ctrl.connect_async("10.0.0.1", "user", "pass", callback)
         mock_thread.assert_called_once()
         mock_thread_instance.start.assert_called_once()
+
     @patch("cameratile.ONVIFCamera")
     def test_connect_async_uses_media_profile_token(self, mock_cam_class):
         """connect_async gets the token from GetProfiles, not GetConfigurations."""
@@ -201,7 +198,6 @@ class TestPTZController(unittest.TestCase):
         callback.assert_called_once_with(
             False, "No media profiles or PTZ configurations found"
         )
-
 
     # --- continuous_zoom ---
 

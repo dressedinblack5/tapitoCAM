@@ -162,6 +162,5 @@ class TestConfigManager(unittest.TestCase):
         self.assertIn("Invalid IP", msg)
 
 
-
 if __name__ == "__main__":
     unittest.main()

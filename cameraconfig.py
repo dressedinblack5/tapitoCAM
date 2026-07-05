@@ -50,6 +50,7 @@ class ConfigManager:
         """Try to import keyring. Returns the module or None."""
         try:
             import keyring  # noqa: E402
+
             return keyring
         except ImportError:
             return None
@@ -59,18 +60,14 @@ class ConfigManager:
         if self._keyring is None:
             return
         with contextlib.suppress(Exception):
-            self._keyring.set_password(
-                KEYRING_SERVICE, f"camera_{camera_id}", password
-            )
+            self._keyring.set_password(KEYRING_SERVICE, f"camera_{camera_id}", password)
 
     def _keyring_get(self, camera_id: int) -> str | None:
         """Retrieve password from OS keyring. Returns None on any failure."""
         if self._keyring is None:
             return None
         try:
-            return self._keyring.get_password(
-                KEYRING_SERVICE, f"camera_{camera_id}"
-            )
+            return self._keyring.get_password(KEYRING_SERVICE, f"camera_{camera_id}")
         except Exception:
             return None
 
@@ -79,9 +76,7 @@ class ConfigManager:
         if self._keyring is None:
             return
         with contextlib.suppress(Exception):
-            self._keyring.delete_password(
-                KEYRING_SERVICE, f"camera_{camera_id}"
-            )
+            self._keyring.delete_password(KEYRING_SERVICE, f"camera_{camera_id}")
 
     # ------------------------------------------------------------------
     # I/O
