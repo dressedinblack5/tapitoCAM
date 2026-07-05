@@ -36,7 +36,7 @@ class _CameraEditDialog(QDialog):
         self._camera = camera or {}
         self._result: dict | None = None
         self._build_ui()
-        self._apply_stylesheet()
+        self.setStyleSheet(DARK_THEME)
         if camera:
             self._populate(camera)
         if ip:
@@ -128,9 +128,6 @@ class _CameraEditDialog(QDialog):
     def result_data(self) -> dict | None:
         return self._result
 
-    def _apply_stylesheet(self):
-        self.setStyleSheet(DARK_THEME)
-
 
 # ===========================================================================
 # Network scan dialog
@@ -138,7 +135,6 @@ class _CameraEditDialog(QDialog):
 
 
 class _NetworkScanDialog(QDialog):
-
     _device_found = Signal(str)
     _progress_update = Signal(int)
     _scan_finished = Signal()
@@ -148,7 +144,7 @@ class _NetworkScanDialog(QDialog):
         self._selected_ip: str | None = None
         self._scan_active = True
         self._build_ui()
-        self._apply_stylesheet()
+        self.setStyleSheet(DARK_THEME)
         self._device_found.connect(self._add_result)
         self._progress_update.connect(self._update_progress)
         self._scan_finished.connect(self._on_scan_finished)
@@ -252,9 +248,6 @@ class _NetworkScanDialog(QDialog):
     def selected_ip(self) -> str | None:
         return self._selected_ip
 
-    def _apply_stylesheet(self):
-        self.setStyleSheet(DARK_THEME)
-
 
 # ===========================================================================
 # Camera Manager Dialog  (main)
@@ -273,7 +266,7 @@ class CameraManagerDialog(QDialog):
         self._cfg = config_manager or ConfigManager()
         self._cameras: list[dict] = []
         self._build_ui()
-        self._apply_stylesheet()
+        self.setStyleSheet(DARK_THEME)
         self._refresh_list()
 
     def _build_ui(self):
@@ -418,6 +411,3 @@ class CameraManagerDialog(QDialog):
     @property
     def cameras(self) -> list[dict]:
         return self._cameras
-
-    def _apply_stylesheet(self):
-        self.setStyleSheet(DARK_THEME)

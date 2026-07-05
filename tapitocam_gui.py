@@ -53,6 +53,26 @@ from utils import (  # noqa: E402
 )
 
 # ===========================================================================
+# Shared helpers
+# ===========================================================================
+
+
+def _tapo_client(ip: str, user: str, password: str):
+    from pytapo import Tapo
+
+    attempts = [(user, password, "")]
+    if user.lower() != "admin":
+        attempts.append(("admin", password, ""))
+    attempts.append(("admin", password, password))
+    for u, p, cp in attempts:
+        try:
+            return Tapo(ip, u, p, cloudPassword=cp)
+        except Exception:
+            continue
+    return None
+
+
+# ===========================================================================
 # Main Window
 # ===========================================================================
 
@@ -492,7 +512,7 @@ class MainWindow(QMainWindow):
                     text = data.decode("utf-8", errors="replace").strip()
                     if not text:
                         continue
-                    if self._is_mpv_connection_error(text):
+                    if is_mpv_connection_error(text):
                         self._stop_camera(cid)
                         camera = self._cfg.get_camera(cid)
                         name = (
@@ -529,11 +549,6 @@ class MainWindow(QMainWindow):
                 )
             else:
                 self.status_bar.showMessage(f"Stream ended: {name}", 3000)
-
-    @staticmethod
-    def _is_mpv_connection_error(text: str) -> bool:
-        """Return True if *text* from mpv stderr indicates a connection failure."""
-        return is_mpv_connection_error(text)
 
     # ------------------------------------------------------------------
     # Stream control (subprocess mpv)
@@ -592,13 +607,9 @@ class MainWindow(QMainWindow):
             os.unlink(playlist_path)
             err = str(e)
             if is_mpv_connection_error(err):
-                self.status_bar.showMessage(
-                    f"Stream error: {title} — {err}", 0
-                )
+                self.status_bar.showMessage(f"Stream error: {title} — {err}", 0)
             else:
-                self.status_bar.showMessage(
-                    f"Stream failed: {err[:120]}", 0
-                )
+                self.status_bar.showMessage(f"Stream failed: {err[:120]}", 0)
 
         self._sync_ui()
 
@@ -670,7 +681,10 @@ class MainWindow(QMainWindow):
         is_streaming = camera_id in self._processes
         self._set_pantilt_enabled(is_streaming)
         self._set_zoom_enabled(is_streaming and ctrl.has_zoom)
-        if self._preset_combo.count() == 1 and self._preset_combo.itemText(0) == "No presets saved":
+        if (
+            self._preset_combo.count() == 1
+            and self._preset_combo.itemText(0) == "No presets saved"
+        ):
             self._ptz_preset_refresh(camera_id)
 
     def _connect_ptz(self, camera_id: int):
@@ -764,41 +778,15 @@ class MainWindow(QMainWindow):
 
         def _run():
             print(f"[NightMode] thread start mode={mode}", file=sys.stderr)
-            try:
-                from pytapo import Tapo
-            except Exception as e:
-                err_msg = f"import pytapo: {e}"
-                QTimer.singleShot(0, lambda: _fail(err_msg))
-                return
-            # Newer Tapo firmware requires admin + cloud password.
-            # Try all combos: camera account, admin+stored, admin+stored+cloudPassword
-            attempts = []
-            # 1. camera account credentials
-            attempts.append((user, password, ""))
-            # 2. admin + stored password (some firmwares)
-            if user.lower() != "admin":
-                attempts.append(("admin", password, ""))
-            # 3. admin + stored password as both password and cloudPassword
-            attempts.append(("admin", password, password))
-            last_err = ""
-            for u, p, cp in attempts:
-                try:
-                    client = Tapo(ip, u, p, cloudPassword=cp)
-                    print(f"[NightMode] Tapo({ip}) OK user={u}", file=sys.stderr)
-                    last_err = ""
-                    break
-                except Exception as e:
-                    last_err = str(e)
-                    print(f"[NightMode] Tapo({ip}) FAIL user={u}: {e}", file=sys.stderr)
-                    continue
-            if last_err:
+            client = _tapo_client(ip, user, password)
+            if client is None:
                 hint = (
                     " — set username to 'admin' and password to your"
                     " Tapo app (cloud) account password, not the camera account"
                     " password. Also enable 'Third Party Compatibility'"
                     " in the Tapo app."
                 )
-                QTimer.singleShot(0, lambda: _fail(last_err + hint))
+                QTimer.singleShot(0, lambda: _fail(hint))
                 return
             try:
                 client.setDayNightMode(mode)
@@ -832,9 +820,7 @@ class MainWindow(QMainWindow):
         print(f"[LED] toggle {'on' if enabled else 'off'}", file=sys.stderr)
 
         def _done():
-            self.status_bar.showMessage(
-                f"LED {'on' if enabled else 'off'}", 3000
-            )
+            self.status_bar.showMessage(f"LED {'on' if enabled else 'off'}", 3000)
 
         def _fail(err: str):
             print(f"[LED] FAILED: {err}", file=sys.stderr)
@@ -842,25 +828,7 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage(f"LED failed: {err[:80]}", 5000)
 
         def _run():
-
-            try:
-                from pytapo import Tapo
-            except Exception as e:
-                err_msg = f"import pytapo: {e}"
-                QTimer.singleShot(0, lambda: _fail(err_msg))
-                return
-            # Same auth fallback chain as night mode
-            attempts = [(user, password, "")]
-            if user.lower() != "admin":
-                attempts.append(("admin", password, ""))
-            attempts.append(("admin", password, password))
-            client = None
-            for u, p, cp in attempts:
-                try:
-                    client = Tapo(ip, u, p, cloudPassword=cp)
-                    break
-                except Exception:
-                    continue
+            client = _tapo_client(ip, user, password)
             if client is None:
                 QTimer.singleShot(
                     0, lambda: _fail("auth failed — use 'admin' + cloud password")
@@ -966,12 +934,8 @@ class MainWindow(QMainWindow):
             self._preset_combo.addItem("No presets saved")
         self._preset_combo.blockSignals(False)
         self._preset_combo.setEnabled(True)
-        self._preset_go_btn.setEnabled(
-            self._preset_combo.currentData() is not None
-        )
-        self._preset_del_btn.setEnabled(
-            self._preset_combo.currentData() is not None
-        )
+        self._preset_go_btn.setEnabled(self._preset_combo.currentData() is not None)
+        self._preset_del_btn.setEnabled(self._preset_combo.currentData() is not None)
 
     def _ptz_preset_save(self):
         if self._current_camera_id is None:
@@ -1018,8 +982,6 @@ class MainWindow(QMainWindow):
         else:
             self.status_bar.showMessage("Failed to delete preset", 2000)
 
-
-
     # ------------------------------------------------------------------
     # Actions
     # ------------------------------------------------------------------
@@ -1034,7 +996,11 @@ class MainWindow(QMainWindow):
         changed_ids = set()
         for cid in set(before.keys()) & set(after.keys()):
             b, a = before[cid], after[cid]
-            if b.get("ip") != a.get("ip") or b.get("username") != a.get("username") or b.get("password") != a.get("password"):
+            if (
+                b.get("ip") != a.get("ip")
+                or b.get("username") != a.get("username")
+                or b.get("password") != a.get("password")
+            ):
                 changed_ids.add(cid)
 
         for cid in removed_ids | changed_ids:
@@ -1064,6 +1030,7 @@ class MainWindow(QMainWindow):
         self._playlist_files.clear()
         super().closeEvent(event)
 
+
 # ===========================================================================
 # Cleanup — kill orphaned mpv processes on crash
 # ===========================================================================
@@ -1085,6 +1052,7 @@ def _kill_all_processes():
     for path in _playlist_registry.values():
         with contextlib.suppress(OSError):
             os.unlink(path)
+
 
 atexit.register(_kill_all_processes)
 signal.signal(signal.SIGTERM, lambda *_: _kill_all_processes())

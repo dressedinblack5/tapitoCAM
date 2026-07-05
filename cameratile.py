@@ -1,7 +1,5 @@
 """Per-camera ONVIF PTZ controller — async connection, direct PTZ commands."""
 
-from __future__ import annotations
-
 import sys
 import threading
 from collections.abc import Callable
@@ -43,9 +41,7 @@ class PTZController:
         if self._on_error is not None:
             self._on_error(msg)
 
-    def _run_connect(
-        self, host: str, user: str, password: str, callback
-    ):
+    def _run_connect(self, host: str, user: str, password: str, callback):
         """Synchronous ONVIF connect — runs in a background thread.
 
         Exposed as a separate method so tests can call it directly
@@ -214,5 +210,3 @@ class PTZController:
         self.ptz = None
         self.profile_token = None
         self._thread = None
-
-
