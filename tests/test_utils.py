@@ -20,7 +20,7 @@ class TestAuthError(unittest.TestCase):
         self.assertTrue(is_auth_error("RTSP error: 401 Unauthorized"))
 
     def test_auth_401_naked(self):
-        self.assertTrue(is_auth_error("401"))
+        self.assertFalse(is_auth_error("401"))
 
     def test_auth_unauthorized(self):
         self.assertTrue(is_auth_error("Unauthorized"))

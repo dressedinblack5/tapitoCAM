@@ -33,6 +33,7 @@ class PTZController:
         self._thread: threading.Thread | None = None
         self._on_error = on_error
         self._has_zoom = False
+        self._connecting = False
 
     def _report_error(self, context: str, exc: Exception):
         """Log to stderr and forward to the optional callback."""
@@ -88,13 +89,19 @@ class PTZController:
             ok, err = False, str(e)
 
         QTimer.singleShot(0, lambda: callback(ok, err))
+        self._connecting = False
 
     def connect_async(self, host: str, user: str, password: str, callback):
         """Start ONVIF connection in a background thread.
 
         ``callback(success: bool, error: str)`` is invoked in the **main**
         thread when the connection attempt finishes.
+
+        Duplicate calls while a connection is in-flight are silently ignored.
         """
+        if self._connecting:
+            return
+        self._connecting = True
         self._thread = threading.Thread(
             target=self._run_connect,
             args=(host, user, password, callback),
@@ -210,3 +217,4 @@ class PTZController:
         self.ptz = None
         self.profile_token = None
         self._thread = None
+        self._connecting = False

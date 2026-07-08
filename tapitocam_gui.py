@@ -503,6 +503,7 @@ class MainWindow(QMainWindow):
         """Remove mpv processes that have exited or report connection errors."""
         dead = []
         for cid, proc in list(self._processes.items()):
+            stderr_text = None
             if proc.stderr:
                 try:
                     data = proc.stderr.read(4096)
@@ -531,11 +532,12 @@ class MainWindow(QMainWindow):
                                 f"Stream error: {name} — {short}", 0
                             )
                         continue
+                    stderr_text = text
 
             rc = proc.poll()
             if rc is not None:
-                dead.append((cid, rc))
-        for cid, rc in dead:
+                dead.append((cid, rc, stderr_text))
+        for cid, rc, stderr_text in dead:
             self._processes.pop(cid, None)
             playlist = self._playlist_files.pop(cid, None)
             if playlist:
@@ -544,9 +546,10 @@ class MainWindow(QMainWindow):
             camera = self._cfg.get_camera(cid)
             name = camera.get("name", f"Camera {cid}") if camera else f"Camera {cid}"
             if rc != 0:
-                self.status_bar.showMessage(
-                    f"Stream failed: {name} (mpv exited with code {rc})", 0
-                )
+                msg = f"Stream failed: {name} (mpv exited with code {rc})"
+                if stderr_text:
+                    msg = f"Stream failed: {name} — {stderr_text[:120]}"
+                self.status_bar.showMessage(msg, 0)
             else:
                 self.status_bar.showMessage(f"Stream ended: {name}", 3000)
 

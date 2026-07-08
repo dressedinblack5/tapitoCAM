@@ -34,7 +34,6 @@ def is_mpv_connection_error(text: str) -> bool:
 # ---------------------------------------------------------------------------
 MPV_AUTH_ERROR_PATTERNS = (
     "401 unauthorized",
-    "401",
     "authentication failed",
     "authenticate failed",
     "unauthorized",
