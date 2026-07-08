@@ -245,11 +245,11 @@ class MainWindow(QMainWindow):
         zoom_row.setContentsMargins(0, 0, 0, 0)
         zoom_row.addStretch()
 
-        self._ptz_zoom_out = QPushButton("🔍-")
+        self._ptz_zoom_out = QPushButton("−")
         self._ptz_zoom_out.setFixedSize(btn_size, btn_size)
         self._ptz_zoom_out.setEnabled(False)
 
-        self._ptz_zoom_in = QPushButton("🔍+")
+        self._ptz_zoom_in = QPushButton("+")
         self._ptz_zoom_in.setFixedSize(btn_size, btn_size)
         self._ptz_zoom_in.setEnabled(False)
 
@@ -302,7 +302,7 @@ class MainWindow(QMainWindow):
         self._preset_del_btn.setIcon(
             self.style().standardIcon(QStyle.StandardPixmap.SP_TrashIcon)
         )
-        self._preset_del_btn.setFixedSize(32, 32)
+        self._preset_del_btn.setFixedSize(38, 32)
         self._preset_del_btn.setEnabled(False)
         self._preset_del_btn.clicked.connect(self._ptz_preset_delete)
         preset_row.addWidget(self._preset_del_btn)
@@ -993,7 +993,7 @@ class MainWindow(QMainWindow):
         before = {c["id"]: c for c in self._cfg.load()}
         dialog = CameraManagerDialog(self, self._cfg)
         dialog.exec()
-        after = {c["id"]: c for c in self._cfg.load()}
+        after = {c["id"]: c for c in dialog.cameras}
 
         removed_ids = set(before.keys()) - set(after.keys())
         changed_ids = set()

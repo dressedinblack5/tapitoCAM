@@ -49,6 +49,7 @@ class _CameraEditDialog(QDialog):
 
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
+        layout.setContentsMargins(12, 12, 12, 12)
 
         form = QFormLayout()
         form.setSpacing(8)
@@ -156,6 +157,7 @@ class _NetworkScanDialog(QDialog):
 
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
+        layout.setContentsMargins(12, 12, 12, 12)
 
         self._progress_label = QLabel("Detecting network...")
         layout.addWidget(self._progress_label)
@@ -275,13 +277,14 @@ class CameraManagerDialog(QDialog):
 
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
+        layout.setContentsMargins(12, 12, 12, 12)
 
         self._list = QListWidget()
-        self._list.setAlternatingRowColors(False)
         self._list.setSpacing(2)
         layout.addWidget(self._list, stretch=1)
 
         btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
         self._add_btn = QPushButton("+ Add")
         self._scan_btn = QPushButton("Scan Network")
         self._edit_btn = QPushButton("✏ Edit")
@@ -307,16 +310,12 @@ class CameraManagerDialog(QDialog):
         btn_row.addWidget(self._down_btn)
         layout.addLayout(btn_row)
 
-        self._ok_btn = QPushButton("OK")
-        self._cancel_btn = QPushButton("Cancel")
-        self._ok_btn.clicked.connect(self._on_ok)
-        self._cancel_btn.clicked.connect(self.reject)
-
-        bottom_row = QHBoxLayout()
-        bottom_row.addStretch()
-        bottom_row.addWidget(self._ok_btn)
-        bottom_row.addWidget(self._cancel_btn)
-        layout.addLayout(bottom_row)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
 
         self._list.currentRowChanged.connect(self._on_selection_changed)
         self._on_selection_changed()
@@ -404,9 +403,6 @@ class CameraManagerDialog(QDialog):
         self._cfg.reorder_cameras(row, row + 1)
         self._refresh_list()
         self._list.setCurrentRow(row + 1)
-
-    def _on_ok(self):
-        self.accept()
 
     @property
     def cameras(self) -> list[dict]:
